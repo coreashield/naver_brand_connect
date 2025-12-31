@@ -1,0 +1,37 @@
+{
+  "posts": [
+    {
+      "id": "post_1767071315831",
+      "productId": "123456789",
+      "productName": "[제품명을 입력하세요]",
+      "category": "fashion",
+      "publishedAt": "2025-12-30T05:08:35.831Z",
+      "outputFile": "원고_20251230__제품명을_입력하세요_.md",
+      "metrics": {
+        "views": 0,
+        "clicks": 0,
+        "conversions": 0,
+        "revenue": 0
+      },
+      "keywords": [
+        "[제품명을 입력하세요]",
+        "[브랜드명]",
+        "겨울",
+        "겨울 코디",
+        "[제품명을 입력하세요] 후기",
+        "[제품명을 입력하세요] 리뷰",
+        "캐주얼",
+        "데일리룩",
+        "여성 패션"
+      ],
+      "createdAt": "2025-12-30T05:08:35.831Z"
+    }
+  ],
+  "summary": {
+    "totalPosts": 1,
+    "totalViews": 0,
+    "totalClicks": 0,
+    "totalRevenue": 0
+  },
+  "lastUpdated": "2025-12-30T05:08:35.831Z"
+}

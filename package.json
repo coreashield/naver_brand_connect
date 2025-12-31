@@ -1,0 +1,42 @@
+{
+  "name": "shopping-connect-blog-writer",
+  "version": "1.0.0",
+  "description": "네이버 쇼핑커넥트 제품 링크를 분석하고 SEO 최적화된 블로그 원고를 자동 생성하는 프로그램",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "app": "node app.js",
+    "cafe": "node cafe_writer.js",
+    "crawl": "node link_crawler.js",
+    "build": "npm run build:cafe",
+    "build:cafe": "pkg cafe_writer_pkg.cjs -t node18-win-x64 -o dist/카페글쓰기.exe",
+    "test": "node --test"
+  },
+  "keywords": [
+    "naver",
+    "shopping-connect",
+    "blog",
+    "seo",
+    "content-generator"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "playwright": "^1.57.0",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "pkg": {
+    "scripts": ["title_suffixes.js"],
+    "assets": [".env"],
+    "targets": ["node18-win-x64"],
+    "outputPath": "dist"
+  }
+}

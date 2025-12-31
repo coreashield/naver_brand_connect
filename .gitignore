@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment variables (sensitive data)
+.env
+
+# Output files
+output/
+
+# Portable package
+portable_package/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Windows special files
+nul

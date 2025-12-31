@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(sc:brainstorm)",
+      "WebSearch",
+      "mcp__serena__list_dir",
+      "Bash(node src/index.js:*)",
+      "WebFetch(domain:brandconnect.naver.com)",
+      "Bash(node scrape.js:*)",
+      "Bash(npm install:*)",
+      "Bash(node blog_writer.js:*)",
+      "Bash(node analyze_editor.js:*)",
+      "Bash(node analyze_sticker.js:*)",
+      "Bash(node:*)",
+      "Bash(echo:*)",
+      "Bash(del C:UsersuserDesktopshopping_connectanalyze_page.js)",
+      "Bash(del C:UsersuserDesktopshopping_connecttest_hashtag.js)",
+      "Bash(timeout /t 60 /nobreak)",
+      "Bash(dir \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\*.js\" /b)",
+      "Bash(dir:*)",
+      "Bash(mkdir:*)",
+      "mcp__playwright__browser_navigate",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
