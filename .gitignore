@@ -7,8 +7,11 @@ node_modules/
 # Output files
 output/
 
-# Portable package
+# Portable packages (large files - rebuild on target)
 portable_package/
+cafe_standalone/
+node_portable/
+*.zip
 
 # OS files
 .DS_Store

@@ -2,240 +2,547 @@ import { chromium } from 'playwright';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
+import sharp from 'sharp';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config();
 
-// 이미지 파일 경로 (image_handler.js에서 생성된 이미지)
-const PRODUCT_IMAGES_DIR = 'output/images';
-
+// 환경 변수
 const NAVER_ID = process.env.NAVER_ID?.trim();
 const NAVER_PW = process.env.NAVER_PW?.trim();
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
 const BLOG_WRITE_URL = 'https://blog.naver.com/ingredient7303126?Redirect=Write&categoryNo=6';
 
-// 블로그 원고 - 1500~1800자 이상 + 구체적 이미지 설명
-const blogContent = {
-  title: '2만원대 니트원피스 이게 진짜 됨?',
+// 파일 경로
+const PRODUCT_IMAGES_DIR = 'output/images';
+const PRODUCT_FILE = 'output/product_links.json';
+const POSTED_FILE = 'output/blog_posted.json';  // 블로그용 별도 관리
+const LOG_FILE = 'output/blog_writer.log';
+const MAX_IMAGES = 3;
 
-  sections: [
-    { type: 'image_marker', content: '📷 [제품 메인 이미지]' },
-    { type: 'sticker' },
-    { type: 'text', content: '안녕하세요 여러분! 💕' },
-    { type: 'text', content: '오늘은 제가 최근에 득템한' },
-    { type: 'text', content: '겨울 필수템을 소개해드릴게요!' },
-    { type: 'blank' },
-    { type: 'text', content: '요즘 날씨가 정말' },
-    { type: 'text', content: '많이 추워지면서' },
-    { type: 'text', content: '따뜻하면서도 예쁜 원피스를' },
-    { type: 'text', content: '찾고 있었어요 🥺' },
-    { type: 'blank' },
-    { type: 'text', content: '니트 원피스는 겨울에' },
-    { type: 'text', content: '정말 활용도가 높잖아요?' },
-    { type: 'text', content: '출근할 때도, 데이트할 때도' },
-    { type: 'text', content: '모임 갈 때도 딱 좋은 아이템이죠!' },
-    { type: 'blank' },
-    { type: 'text', content: '근데 막상 찾아보면' },
-    { type: 'text', content: '너무 두꺼워서 뚱뚱해 보이거나' },
-    { type: 'text', content: '얇아서 추운 것들이 대부분이더라고요 ㅠㅠ' },
-    { type: 'blank' },
-    { type: 'text', content: '가격도 천차만별이라' },
-    { type: 'text', content: '뭘 사야 할지 정말 고민이 많았어요' },
-    { type: 'text', content: '비싼 게 무조건 좋은 것도 아니고요 ㅎㅎ' },
-    { type: 'divider' },
+// Gemini API 초기화
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-    { type: 'sticker' },
-    { type: 'quote', content: '셔링 디테일로 날씬해 보이는 원피스 발견!', style: 1 },
-    { type: 'blank' },
-    { type: 'text', content: '그러다 아뜨랑스에서' },
-    { type: 'text', content: '하프넥 셔링 원피스를 발견했어요 ✨' },
-    { type: 'blank' },
-    { type: 'text', content: '처음 상품 페이지를 봤을 때' },
-    { type: 'text', content: '사이드 셔링 디테일이' },
-    { type: 'text', content: '눈에 확 들어왔거든요!' },
-    { type: 'blank' },
-    { type: 'text', content: '셔링이 있으면 체형 보정이' },
-    { type: 'text', content: '자연스럽게 되니까' },
-    { type: 'text', content: '겨울에 딱이겠다 싶었어요!' },
-    { type: 'blank' },
-    { type: 'text', content: '무엇보다 가격이...' },
-    { type: 'text', content: '💰 할인가 27,000원!' },
-    { type: 'text', content: '2만원대에 이 디자인이라니?' },
-    { type: 'text', content: '가성비 너무 좋아서 바로 주문했습니다!' },
-    { type: 'blank' },
-    { type: 'text', content: '솔직히 이 가격이면' },
-    { type: 'text', content: '실패해도 괜찮겠다 싶었는데' },
-    { type: 'text', content: '결과는 대만족이었어요!' },
-    { type: 'divider' },
+// 로그 함수
+function log(message) {
+  const timestamp = new Date().toLocaleString('ko-KR');
+  const logMessage = `[${timestamp}] ${message}`;
+  console.log(logMessage);
+  try {
+    if (!fs.existsSync('output')) fs.mkdirSync('output', { recursive: true });
+    fs.appendFileSync(LOG_FILE, logMessage + '\n', 'utf-8');
+  } catch (e) {}
+}
 
-    { type: 'image_marker', content: '📷 [제품 상세 이미지]' },
-    { type: 'sticker' },
-    { type: 'quote', content: '📦 실제 착용 후기', style: 2 },
-    { type: 'blank' },
-    { type: 'text', content: '배송은 주문 후 이틀 만에 왔고요!' },
-    { type: 'text', content: '택배 받자마자' },
-    { type: 'text', content: '바로 입어봤는데요!' },
-    { type: 'blank' },
-    { type: 'text', content: '▸ 핏감과 사이즈' },
-    { type: 'blank' },
-    { type: 'text', content: '저는 163cm / 54kg이고' },
-    { type: 'text', content: '프리사이즈로 주문했어요' },
-    { type: 'blank' },
-    { type: 'text', content: '전체적으로 여유 있는 핏이라' },
-    { type: 'text', content: '편하게 입기 정말 좋았어요 👍' },
-    { type: 'text', content: '레이어드 하기에도 괜찮은 핏이에요!' },
-    { type: 'blank' },
-    { type: 'text', content: '길이는 무릎 바로 아래까지 오는데' },
-    { type: 'text', content: '너무 길지 않아서 답답하지 않고' },
-    { type: 'text', content: '활동하기에도 편해요!' },
-    { type: 'blank' },
-    { type: 'text', content: '하프넥 디자인이라서' },
-    { type: 'text', content: '목이 답답하지 않으면서도 따뜻해요!' },
-    { type: 'text', content: '터틀넥 싫어하시는 분들께 딱이에요 ㅎㅎ' },
-    { type: 'text', content: '저도 터틀넥이 답답해서 잘 안 입거든요!' },
-    { type: 'divider' },
+// 상품 로드
+function loadProducts() {
+  try {
+    if (fs.existsSync(PRODUCT_FILE)) {
+      return JSON.parse(fs.readFileSync(PRODUCT_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    log(`상품 로드 오류: ${e.message}`);
+  }
+  return [];
+}
 
-    { type: 'image_marker', content: '📷 [제품 디테일 컷 - 소재감/셔링 클로즈업]' },
-    { type: 'sticker' },
-    { type: 'text', content: '▸ 소재감' },
-    { type: 'blank' },
-    { type: 'text', content: '니트 소재가 적당히 두께감 있어서' },
-    { type: 'text', content: '보온성이 정말 좋아요!' },
-    { type: 'text', content: '겨울에 이너만 입어도 충분할 것 같아요!' },
-    { type: 'blank' },
-    { type: 'text', content: '무엇보다 까슬거리지 않고' },
-    { type: 'text', content: '부드러워서' },
-    { type: 'text', content: '맨살에 닿아도 불편함 없어요!' },
-    { type: 'blank' },
-    { type: 'text', content: '니트 특유의 가려움이 없어서' },
-    { type: 'text', content: '이너 없이 입어도 전혀 문제없더라고요 ㅎㅎ' },
-    { type: 'text', content: '민감한 피부 가지신 분들도' },
-    { type: 'text', content: '편하게 입으실 수 있을 것 같아요!' },
-    { type: 'divider' },
+// 게시 카운트 로드
+function loadPostedProducts() {
+  try {
+    if (fs.existsSync(POSTED_FILE)) {
+      const data = JSON.parse(fs.readFileSync(POSTED_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        const map = new Map();
+        data.forEach(id => map.set(id, 1));
+        return map;
+      }
+      return new Map(Object.entries(data));
+    }
+  } catch (e) {}
+  return new Map();
+}
 
-    { type: 'sticker' },
-    { type: 'text', content: '▸ 셔링 디테일' },
-    { type: 'blank' },
-    { type: 'quote', content: '사이드 셔링이 진짜 예뻐요!', style: 0 },
-    { type: 'blank' },
-    { type: 'text', content: '이 원피스의 핵심 포인트는' },
-    { type: 'text', content: '바로 사이드 셔링이에요!' },
-    { type: 'blank' },
-    { type: 'text', content: '옆에서 봤을 때' },
-    { type: 'text', content: '허리라인이 자연스럽게 잡혀서' },
-    { type: 'text', content: '날씬해 보이는 효과 있어요 🙈' },
-    { type: 'blank' },
-    { type: 'text', content: '뱃살이나 옆구리살' },
-    { type: 'text', content: '걱정되시는 분들!' },
-    { type: 'text', content: '셔링이 자연스럽게 커버해줘요 ㅋㅋ' },
-    { type: 'text', content: '저도 배 나온 게 고민인데' },
-    { type: 'text', content: '이 원피스 입으면 신경 안 써요!' },
-    { type: 'blank' },
-    { type: 'text', content: '플레어 스커트 부분도' },
-    { type: 'text', content: '움직일 때마다 자연스럽게 흔들려서' },
-    { type: 'text', content: '여성스러운 느낌이 나요!' },
-    { type: 'blank' },
-    { type: 'text', content: '하체가 고민이신 분들도' },
-    { type: 'text', content: 'A라인 실루엣 덕분에' },
-    { type: 'text', content: '걱정 없이 입으실 수 있어요!' },
-    { type: 'text', content: '허벅지나 엉덩이가 커버되거든요!' },
-    { type: 'divider' },
+// 게시 카운트 저장
+function savePostedProducts(posted) {
+  if (!fs.existsSync('output')) fs.mkdirSync('output', { recursive: true });
+  const obj = Object.fromEntries(posted);
+  fs.writeFileSync(POSTED_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+}
 
-    { type: 'sticker' },
-    { type: 'quote', content: '👗 다양한 코디 추천', style: 1 },
-    { type: 'blank' },
-    { type: 'text', content: '이 원피스로 다양하게' },
-    { type: 'text', content: '스타일링 해봤는데요!' },
-    { type: 'text', content: '어떤 스타일이든 잘 어울려요!' },
-    { type: 'blank' },
-    { type: 'text', content: '🏠 데일리룩' },
-    { type: 'text', content: '원피스 + 롱부츠 조합이면 끝!' },
-    { type: 'text', content: '간단하면서도 완성도 있어요!' },
-    { type: 'text', content: '장보기, 카페 가기 딱이에요!' },
-    { type: 'blank' },
-    { type: 'text', content: '💼 오피스룩' },
-    { type: 'text', content: '흰 블라우스 레이어드 + 펌프스' },
-    { type: 'text', content: '깔끔하고 단정한 느낌!' },
-    { type: 'text', content: '직장인 분들께 강추해요!' },
-    { type: 'blank' },
-    { type: 'text', content: '💝 데이트룩' },
-    { type: 'text', content: '롱코트 + 앵클부츠 + 미니백' },
-    { type: 'text', content: '고급스러운 분위기 연출 가능!' },
-    { type: 'text', content: '남자친구한테 칭찬 많이 받았어요 ㅎㅎ' },
-    { type: 'blank' },
-    { type: 'text', content: '요즘 같은 추운 겨울엔' },
-    { type: 'text', content: '무스탕이나 패딩이랑도 잘 어울려요!' },
-    { type: 'text', content: '숏패딩이랑 매치하면' },
-    { type: 'text', content: '캐주얼한 느낌도 연출 가능!' },
-    { type: 'divider' },
+// 상품 정렬 (카운트 낮은 것 우선)
+function sortProductsByCount(products, postedCounts) {
+  return [...products].sort((a, b) => {
+    const countA = postedCounts.get(a.productId) || 0;
+    const countB = postedCounts.get(b.productId) || 0;
+    if (countA !== countB) return countA - countB;
+    return Math.random() - 0.5;
+  });
+}
 
-    { type: 'sticker' },
-    { type: 'quote', content: '✅ 장단점 솔직 정리', style: 2 },
-    { type: 'blank' },
-    { type: 'text', content: '2주 정도 입어보고 나서' },
-    { type: 'text', content: '솔직하게 정리해볼게요!' },
-    { type: 'blank' },
-    { type: 'text', content: '✅ 장점' },
-    { type: 'text', content: '✔️ 사이드 셔링으로 날씬해 보임' },
-    { type: 'text', content: '✔️ 27,000원 말도 안 되는 가성비' },
-    { type: 'text', content: '✔️ 데일리/오피스/데이트 다양한 코디 가능' },
-    { type: 'text', content: '✔️ 까슬거리지 않는 부드러운 소재감' },
-    { type: 'text', content: '✔️ 적당한 두께감으로 보온성 굿' },
-    { type: 'text', content: '✔️ 하프넥이라 답답하지 않음' },
-    { type: 'blank' },
-    { type: 'text', content: '⚠️ 아쉬운 점' },
-    { type: 'text', content: '• 단독 세탁 권장 (니트라서요!)' },
-    { type: 'text', content: '• 여유핏이라 슬림핏 원하시면 비추' },
-    { type: 'text', content: '• 인기 많아서 품절 자주 됨' },
-    { type: 'blank' },
-    { type: 'text', content: '전반적으로 장점이 훨씬 많아서' },
-    { type: 'text', content: '정말 만족스러운 구매였어요!' },
-    { type: 'text', content: '가성비로는 이만한 게 없는 것 같아요!' },
-    { type: 'divider' },
+// ============================================
+// 이미지 다운로드 및 처리 함수들
+// ============================================
+async function downloadImage(url, filepath) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(filepath);
 
-    { type: 'sticker' },
-    { type: 'quote', content: '🙋‍♀️ 이런 분께 추천해요!', style: 0 },
-    { type: 'blank' },
-    { type: 'text', content: '겨울에 따뜻하면서도' },
-    { type: 'text', content: '예쁜 원피스 찾으시는 분' },
-    { type: 'blank' },
-    { type: 'text', content: '3만원 이하 가성비 좋은' },
-    { type: 'text', content: '겨울템 원하시는 분' },
-    { type: 'blank' },
-    { type: 'text', content: '출퇴근룩, 데이트룩 등' },
-    { type: 'text', content: '다양하게 활용하고 싶으신 분' },
-    { type: 'blank' },
-    { type: 'text', content: '체형이 커버되는 원피스' },
-    { type: 'text', content: '찾으시는 분 (배, 허벅지, 엉덩이)' },
-    { type: 'blank' },
-    { type: 'text', content: '터틀넥은 답답해서' },
-    { type: 'text', content: '싫으신 분' },
-    { type: 'divider' },
+    protocol.get(url, (response) => {
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        downloadImage(response.headers.location, filepath).then(resolve).catch(reject);
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
 
-    { type: 'sticker' },
-    { type: 'quote', content: '💯 이 가격에 이 퀄리티면 가성비 갑!', style: 1 },
-    { type: 'blank' },
-    { type: 'text', content: '솔직히 2만원대 니트 원피스라서' },
-    { type: 'text', content: '처음엔 기대 안 했거든요?' },
-    { type: 'blank' },
-    { type: 'text', content: '근데 리뷰도 많고 평점도 좋아서' },
-    { type: 'text', content: '믿고 구매했는데' },
-    { type: 'text', content: '기대 이상이었어요!' },
-    { type: 'blank' },
-    { type: 'text', content: '올겨울 많이 입을 것 같아서' },
-    { type: 'text', content: '다른 컬러도 추가 구매 고민 중이에요 ㅎㅎ' },
-    { type: 'text', content: '블랙이랑 아이보리가 있는데' },
-    { type: 'text', content: '둘 다 예쁘더라고요!' },
-    { type: 'blank' },
-    { type: 'text', content: '겨울 원피스 고민되시는 분들!' },
-    { type: 'text', content: '이 가격에 이 퀄리티면' },
-    { type: 'text', content: '진짜 가성비 좋은 것 같아요!' },
-    { type: 'text', content: '한 번 고려해보세요 💕' },
-    { type: 'blank' },
-    { type: 'text', content: '그럼 오늘도 예쁘게 입어요! 🥰' },
-    { type: 'divider' },
-    { type: 'notice', content: '이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.' }
-  ]
-};
+        // 파일 크기 검증 (5KB 미만은 에러 이미지로 간주)
+        try {
+          const stats = fs.statSync(filepath);
+          if (stats.size < 5000) {
+            fs.unlinkSync(filepath);
+            reject(new Error(`이미지 크기 너무 작음: ${stats.size} bytes`));
+            return;
+          }
+        } catch (e) {
+          reject(e);
+          return;
+        }
 
+        resolve(filepath);
+      });
+    }).on('error', (err) => {
+      fs.unlink(filepath, () => {});
+      reject(err);
+    });
+  });
+}
+
+async function processImage(inputPath, outputPath, options = {}) {
+  const { width = 800, quality = 85, addNoise = true } = options;
+
+  try {
+    let image = sharp(inputPath);
+    const metadata = await image.metadata();
+
+    if (metadata.width > width) {
+      image = image.resize(width, null, { fit: 'inside' });
+    }
+
+    if (addNoise) {
+      image = image.modulate({
+        brightness: 1.01 + Math.random() * 0.02,
+        saturation: 1.0 + Math.random() * 0.02
+      });
+      image = image.blur(0.3);
+    }
+
+    await image.jpeg({ quality: quality, mozjpeg: true }).toFile(outputPath);
+    console.log(`  → 이미지 처리 완료: ${path.basename(outputPath)}`);
+    return outputPath;
+  } catch (error) {
+    console.error(`  → 이미지 처리 실패: ${error.message}`);
+    return null;
+  }
+}
+
+// 제품 페이지에서 이미지 URL 추출 및 다운로드
+async function scrapeAndDownloadImages(page, productUrl) {
+  console.log('\n=== 제품 이미지 다운로드 ===');
+
+  // 이미지 폴더 초기화
+  if (!fs.existsSync(PRODUCT_IMAGES_DIR)) {
+    fs.mkdirSync(PRODUCT_IMAGES_DIR, { recursive: true });
+  } else {
+    // 기존 이미지 삭제
+    const oldFiles = fs.readdirSync(PRODUCT_IMAGES_DIR);
+    for (const file of oldFiles) {
+      fs.unlinkSync(path.join(PRODUCT_IMAGES_DIR, file));
+    }
+  }
+
+  await page.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  // 이미지 URL 추출 (에러/플레이스홀더 이미지 필터링)
+  const imageUrls = await page.evaluate(() => {
+    const urls = [];
+    const selectors = [
+      '.product-image img', '.thumb_area img', '.product_thumb img',
+      '[class*="product"] img', '[class*="thumb"] img', '.swiper-slide img',
+      'img[src*="shop"]', 'img[src*="product"]', 'img[src*="phinf"]'
+    ];
+
+    for (const selector of selectors) {
+      const images = document.querySelectorAll(selector);
+      images.forEach(img => {
+        let src = img.src || img.getAttribute('data-src');
+        if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
+          // 에러/플레이스홀더 이미지 제외
+          if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
+              src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
+              src.includes('icon') || src.includes('blank') || src.includes('avatar')) {
+            return;
+          }
+          if (src.startsWith('//')) src = 'https:' + src;
+          src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, ''); // 고화질로 변환
+          if (!urls.includes(src)) urls.push(src);
+        }
+      });
+    }
+    return urls;
+  });
+
+  console.log(`발견된 이미지: ${imageUrls.length}개`);
+
+  // 최대 3개만 다운로드
+  const urlsToDownload = imageUrls.slice(0, MAX_IMAGES);
+  const downloadedImages = [];
+
+  for (let i = 0; i < urlsToDownload.length; i++) {
+    const url = urlsToDownload[i];
+    const tempFile = path.join(PRODUCT_IMAGES_DIR, `temp_${i}.jpg`);
+    const outputFile = path.join(PRODUCT_IMAGES_DIR, `product_${i + 1}.jpg`);
+
+    console.log(`이미지 ${i + 1}/${urlsToDownload.length} 다운로드 중...`);
+
+    try {
+      await downloadImage(url, tempFile);
+      const processed = await processImage(tempFile, outputFile, {
+        width: 800,
+        quality: 85 - Math.floor(Math.random() * 5),
+        addNoise: true
+      });
+
+      if (processed) downloadedImages.push(outputFile);
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch (error) {
+      console.error(`  → 이미지 ${i + 1} 실패:`, error.message);
+    }
+  }
+
+  console.log(`✅ 총 ${downloadedImages.length}개 이미지 준비 완료\n`);
+  return downloadedImages;
+}
+
+// ============================================
+// 1. 제품 정보 크롤링 (Playwright)
+// ============================================
+async function crawlProductInfo(productUrl) {
+  console.log('=== 제품 정보 크롤링 시작 ===');
+  console.log(`URL: ${productUrl}`);
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    // 네이버 쇼핑/스마트스토어 기준 셀렉터
+    const productInfo = await page.evaluate(() => {
+      const getText = (selector) => {
+        const el = document.querySelector(selector);
+        return el ? el.textContent.trim() : '';
+      };
+
+      const getTexts = (selector) => {
+        const els = document.querySelectorAll(selector);
+        return Array.from(els).map(el => el.textContent.trim()).filter(t => t);
+      };
+
+      // 제품명
+      const productName = getText('._3oDjSvLwwi, .product-title, h2._22kNQuEXmb, [class*="ProductName"]') ||
+                          getText('h1, h2') ||
+                          '제품명 없음';
+
+      // 가격
+      const price = getText('._1LY7DqCnwR, .product-price, ._1lyw6G67B3, [class*="Price"]') ||
+                    getText('[class*="price"]') ||
+                    '가격 정보 없음';
+
+      // 할인가
+      const salePrice = getText('._2pgHN-ntx6, .sale-price, [class*="SalePrice"]') || price;
+
+      // 브랜드/쇼핑몰명
+      const brand = getText('._1vVKjJByMy, .brand-name, [class*="Brand"]') ||
+                    getText('[class*="mall"], [class*="store"]') ||
+                    '';
+
+      // 제품 설명/상세
+      const description = getText('._1RnNDNAvWS, .product-description, [class*="Description"]') ||
+                          getText('[class*="detail"], [class*="info"]') ||
+                          '';
+
+      // 리뷰 요약
+      const reviewCount = getText('._2PQrR3RDAE, [class*="review-count"], [class*="ReviewCount"]') || '0';
+      const rating = getText('._1ApVZR0iHM, [class*="rating"], [class*="Rating"]') || '';
+
+      // 제품 특징/옵션
+      const features = getTexts('[class*="option"], [class*="feature"], [class*="spec"] li');
+
+      // 카테고리
+      const category = getText('[class*="category"], [class*="breadcrumb"]') || '';
+
+      // 배송 정보
+      const delivery = getText('[class*="delivery"], [class*="shipping"]') || '';
+
+      return {
+        productName,
+        price,
+        salePrice,
+        brand,
+        description,
+        reviewCount,
+        rating,
+        features: features.slice(0, 10),
+        category,
+        delivery,
+        url: window.location.href
+      };
+    });
+
+    console.log('\n📦 크롤링된 제품 정보:');
+    console.log(`  제품명: ${productInfo.productName}`);
+    console.log(`  가격: ${productInfo.price}`);
+    console.log(`  할인가: ${productInfo.salePrice}`);
+    console.log(`  브랜드: ${productInfo.brand}`);
+    console.log(`  리뷰: ${productInfo.reviewCount}개`);
+
+    await browser.close();
+    return productInfo;
+
+  } catch (error) {
+    console.error('크롤링 오류:', error.message);
+    await browser.close();
+    throw error;
+  }
+}
+
+// ============================================
+// 2. Gemini API로 원고 생성
+// ============================================
+async function generateBlogContent(productInfo) {
+  console.log('\n=== Gemini API로 원고 생성 중 ===');
+
+  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
+    throw new Error('GEMINI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.');
+  }
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  const prompt = `당신은 20~30대 여성 블로거입니다. 아래 제품 정보를 바탕으로 네이버 블로그에 올릴 자연스럽고 상세한 후기 글을 작성해주세요.
+
+## 제품 정보
+- 제품명: ${productInfo.productName}
+- 가격: ${productInfo.price}
+- 할인가: ${productInfo.salePrice}
+- 브랜드: ${productInfo.brand}
+- 설명: ${productInfo.description}
+- 리뷰 수: ${productInfo.reviewCount}
+- 평점: ${productInfo.rating}
+- 특징: ${productInfo.features?.join(', ') || '없음'}
+- 카테고리: ${productInfo.category}
+
+## 작성 규칙
+1. 글자 수: 최소 2500자 이상, 가능하면 3000~3500자
+2. 말투: 친근한 반말체 (~요, ~거든요, ㅎㅎ, ㅋㅋ 사용)
+3. 이모지: 적당히 자연스럽게 사용 (문단마다 1~2개)
+4. 구성 (각 섹션을 충분히 길게 작성):
+   - 도입 (300~400자): 왜 이 제품을 사게 됐는지 (고민, 계기, 검색 과정)
+   - 첫인상 (300~400자): 배송, 포장, 언박싱 경험
+   - 상세 리뷰 (800~1000자): 실제 사용 후기 (장점, 착용감, 소재, 디테일, 색상, 사이즈 등 구체적으로)
+   - 활용법 (300~400자): 어떤 상황에서 사용하면 좋은지, 코디 제안 등
+   - 장단점 (400~500자): 솔직한 장단점 상세 정리 (장점 4~5개, 단점 1~2개)
+   - 가격 분석 (200~300자): 가성비, 할인 정보, 비슷한 제품과 비교
+   - 마무리 (300~400자): 추천 대상, 총평, 재구매 의사
+
+## 중요한 포맷 규칙
+- 문단 구분은 빈 줄로 해주세요
+- 각 섹션 시작 전에 [DIVIDER] 를 넣어주세요
+- 인용구가 필요한 부분은 [QUOTE]내용[/QUOTE] 형식으로 (3~4개 정도)
+- 스티커 삽입 위치는 [STICKER] 로 표시 (4~5개 정도, 각 섹션 사이에)
+- 절대로 이미지 관련 표시([IMAGE] 등)는 넣지 마세요 - 이미지는 별도 처리합니다
+
+## 주의사항
+- 광고티 나지 않게 자연스럽게
+- 너무 과장하지 말고 솔직하게
+- 실제로 구매한 것처럼 생생하게
+- 한 문장이 너무 길지 않게 끊어서
+- 각 문단을 충분히 길게 작성 (한 문단에 3~5문장)
+- 제품의 세부 사항을 구체적으로 묘사
+- 독자가 구매 결정에 도움이 되도록 상세하게
+
+제목과 본문을 작성해주세요. 반드시 2500자 이상으로 길게 작성해주세요!
+형식:
+[TITLE]
+제목 내용
+
+[CONTENT]
+본문 내용...`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+
+    console.log('✅ 원고 생성 완료!');
+    console.log(`생성된 글자 수: 약 ${responseText.length}자`);
+
+    return parseGeminiResponse(responseText);
+  } catch (error) {
+    console.error('Gemini API 오류:', error.message);
+    throw error;
+  }
+}
+
+// ============================================
+// 3. Gemini 응답 파싱 → sections 배열로 변환
+// ============================================
+function parseGeminiResponse(responseText) {
+  // 제목 추출
+  const titleMatch = responseText.match(/\[TITLE\]\s*([\s\S]*?)(?=\[CONTENT\]|\n\n)/i);
+  const title = titleMatch ? titleMatch[1].trim() : '제품 후기';
+
+  // 본문 추출
+  const contentMatch = responseText.match(/\[CONTENT\]\s*([\s\S]*)/i);
+  const content = contentMatch ? contentMatch[1].trim() : responseText;
+
+  // sections 배열 생성
+  const sections = [];
+
+  // 본문을 줄 단위로 분리
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+      sections.push({ type: 'blank' });
+      continue;
+    }
+
+    // [QUOTE]...[/QUOTE] 처리
+    if (trimmedLine.includes('[QUOTE]')) {
+      const quoteMatch = trimmedLine.match(/\[QUOTE\](.*?)\[\/QUOTE\]/);
+      if (quoteMatch) {
+        sections.push({
+          type: 'quote',
+          content: quoteMatch[1].trim(),
+          style: Math.floor(Math.random() * 3) // 랜덤 스타일
+        });
+        continue;
+      }
+    }
+
+    // [DIVIDER] 처리
+    if (trimmedLine === '[DIVIDER]') {
+      sections.push({ type: 'divider' });
+      continue;
+    }
+
+    // [STICKER] 처리
+    if (trimmedLine === '[STICKER]') {
+      sections.push({ type: 'sticker' });
+      continue;
+    }
+
+    // 일반 텍스트
+    sections.push({ type: 'text', content: trimmedLine });
+  }
+
+  // 마지막에 고지문 추가
+  sections.push({ type: 'divider' });
+  sections.push({
+    type: 'notice',
+    content: '이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.'
+  });
+
+  console.log(`파싱 완료: ${sections.length}개 섹션`);
+
+  return { title, sections };
+}
+
+// ============================================
+// 4. 이미지 배치 (첫 번째 고정 + 나머지 랜덤)
+// ============================================
+function insertImagesIntoSections(sections, imageCount) {
+  if (imageCount === 0) return sections;
+
+  const result = [];
+
+  // 첫 번째 이미지는 맨 처음에 고정
+  result.push({ type: 'image', index: 0 });
+  result.push({ type: 'sticker' }); // 이미지 후 스티커
+
+  // 나머지 이미지 랜덤 배치 위치 결정
+  const remainingImages = imageCount - 1;
+
+  if (remainingImages > 0) {
+    // 텍스트 섹션 인덱스 수집 (이미지 삽입 가능한 위치)
+    const textIndices = [];
+    sections.forEach((section, idx) => {
+      if (section.type === 'divider' || section.type === 'blank') {
+        textIndices.push(idx);
+      }
+    });
+
+    // 균등하게 분배할 위치 계산
+    const insertPositions = [];
+    if (textIndices.length >= remainingImages) {
+      const step = Math.floor(textIndices.length / (remainingImages + 1));
+      for (let i = 0; i < remainingImages; i++) {
+        const pos = textIndices[step * (i + 1)] || textIndices[textIndices.length - 1 - i];
+        if (pos !== undefined) {
+          insertPositions.push(pos);
+        }
+      }
+    }
+
+    // 섹션 복사하면서 이미지 삽입
+    let imageIdx = 1;
+    sections.forEach((section, idx) => {
+      result.push(section);
+
+      // 이 위치에 이미지 삽입
+      if (insertPositions.includes(idx) && imageIdx < imageCount) {
+        result.push({ type: 'image', index: imageIdx });
+        imageIdx++;
+      }
+    });
+  } else {
+    // 나머지 이미지 없으면 섹션만 추가
+    result.push(...sections);
+  }
+
+  return result;
+}
+
+// ============================================
+// 5. 사용 가능한 제품 이미지 가져오기
+// ============================================
+function getAvailableProductImages() {
+  const images = [];
+  if (fs.existsSync(PRODUCT_IMAGES_DIR)) {
+    const files = fs.readdirSync(PRODUCT_IMAGES_DIR);
+    for (const file of files) {
+      if (file.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        images.push(path.join(PRODUCT_IMAGES_DIR, file));
+      }
+    }
+  }
+  // 최대 이미지 수 제한
+  const shuffled = images.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, MAX_IMAGES);
+}
+
+// ============================================
+// 6. 네이버 로그인
+// ============================================
 async function naverLogin(page) {
   console.log('네이버 로그인 시도...');
   await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
@@ -249,7 +556,11 @@ async function naverLogin(page) {
   console.log('로그인 완료!');
 }
 
-// 인용구 삽입 (안전한 방식)
+// ============================================
+// 7. 에디터 도구 함수들
+// ============================================
+
+// 인용구 삽입
 async function insertQuote(page, mainFrame, text, styleIndex = 0) {
   try {
     const quoteBtn = await mainFrame.$('button[data-name="quotation"]');
@@ -257,7 +568,6 @@ async function insertQuote(page, mainFrame, text, styleIndex = 0) {
       await quoteBtn.click();
       await page.waitForTimeout(600);
 
-      // 인용구 스타일 선택
       const quoteOptions = await mainFrame.$$('.se-popup-panel button, .se-drop-down-panel button');
       const safeIndex = Math.min(styleIndex, Math.max(0, quoteOptions.length - 1));
       if (quoteOptions.length > 0) {
@@ -265,29 +575,16 @@ async function insertQuote(page, mainFrame, text, styleIndex = 0) {
         await page.waitForTimeout(400);
       }
 
-      // 텍스트 입력
       await page.keyboard.type(text, { delay: 20 });
       await page.waitForTimeout(300);
-
-      // 인용구 밖으로 나가기 - 여러 방법 시도
-      // 1. 맨 끝으로 이동 후 아래로
       await page.keyboard.press('End');
       await page.waitForTimeout(100);
-
-      // 2. 인용구 컴포넌트 밖으로 나가기 (Ctrl+Enter 또는 ArrowDown)
       await page.keyboard.press('ArrowDown');
       await page.waitForTimeout(100);
       await page.keyboard.press('ArrowDown');
       await page.waitForTimeout(100);
 
-      // 3. 본문 영역 클릭으로 확실히 빠져나오기
-      const newTextArea = await mainFrame.$('.se-component.se-text:last-child .se-text-paragraph');
-      if (newTextArea) {
-        await newTextArea.click();
-        await page.waitForTimeout(200);
-      }
-
-      console.log(`  → 인용구 삽입됨 (스타일 ${safeIndex})`);
+      console.log(`  → 인용구 삽입됨`);
     }
   } catch (e) {
     console.log('  인용구 실패:', e.message);
@@ -317,10 +614,8 @@ async function insertDivider(page, mainFrame) {
   }
 }
 
-// 스티커 카테고리 인덱스 (다양하게 선택하기 위해)
+// 스티커 삽입
 let stickerCategoryIndex = 0;
-
-// 스티커 삽입 (다양한 카테고리에서)
 async function insertSticker(page, mainFrame) {
   try {
     const stickerBtn = await mainFrame.$('button[data-name="sticker"]');
@@ -328,29 +623,22 @@ async function insertSticker(page, mainFrame) {
       await stickerBtn.click();
       await page.waitForTimeout(1500);
 
-      // 스티커 카테고리 탭들 찾기 (다양하게 선택)
-      const categoryTabs = await mainFrame.$$('.se-sticker-category-item, [class*="sticker-category"] button, [class*="sticker"] [role="tab"]');
-
+      const categoryTabs = await mainFrame.$$('.se-sticker-category-item, [class*="sticker-category"] button');
       if (categoryTabs.length > 1) {
-        // 카테고리를 순환하며 선택
         const tabIndex = stickerCategoryIndex % categoryTabs.length;
         await categoryTabs[tabIndex].click();
         await page.waitForTimeout(800);
         stickerCategoryIndex++;
       }
 
-      // 스티커 버튼들 찾기
       const stickerItems = await mainFrame.$$('button.se-sidebar-element-sticker');
-
       if (stickerItems.length > 0) {
-        // 랜덤하게 스티커 선택
         const randomIndex = Math.floor(Math.random() * Math.min(12, stickerItems.length));
         await stickerItems[randomIndex].click();
         await page.waitForTimeout(600);
-        console.log(`  → 스티커 삽입됨 (카테고리 ${stickerCategoryIndex}, ${randomIndex + 1}번째)`);
+        console.log(`  → 스티커 삽입됨`);
       } else {
         await page.keyboard.press('Escape');
-        console.log('  → 스티커 없음');
       }
     }
   } catch (e) {
@@ -359,98 +647,54 @@ async function insertSticker(page, mainFrame) {
   }
 }
 
-// 이미지 업로드 함수
+// 이미지 업로드
 async function uploadImage(page, mainFrame, imagePath) {
   try {
-    // 절대 경로로 변환
     const absolutePath = path.resolve(imagePath);
-
     if (!fs.existsSync(absolutePath)) {
       console.log(`  → 이미지 파일 없음: ${imagePath}`);
       return false;
     }
 
-    // 파일 입력 요소 먼저 찾기 (버튼 클릭 전에)
-    let fileInput = await mainFrame.$('input[type="file"][accept*="image"]');
-    if (!fileInput) {
-      fileInput = await mainFrame.$('input[type="file"]');
-    }
-
-    // 이미지 버튼 클릭과 동시에 파일 선택 대기
     const imageBtn = await mainFrame.$('button[data-name="image"]');
     if (imageBtn) {
-      // filechooser 이벤트 대기 설정
       const [fileChooser] = await Promise.all([
         page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
         imageBtn.click()
       ]);
 
       if (fileChooser) {
-        // 네이티브 파일 다이얼로그가 열린 경우
         await fileChooser.setFiles(absolutePath);
-        await page.waitForTimeout(3000); // 업로드 대기
+        await page.waitForTimeout(3000);
         console.log(`  → 이미지 업로드 완료: ${path.basename(imagePath)}`);
         return true;
       } else {
-        // 파일 다이얼로그가 안 열린 경우, input 요소로 직접 설정
         await page.waitForTimeout(1000);
-
-        fileInput = await mainFrame.$('input[type="file"][accept*="image"]');
-        if (!fileInput) {
-          fileInput = await mainFrame.$('input[type="file"]');
-        }
-
+        const fileInput = await mainFrame.$('input[type="file"]');
         if (fileInput) {
           await fileInput.setInputFiles(absolutePath);
           await page.waitForTimeout(3000);
           console.log(`  → 이미지 업로드 완료: ${path.basename(imagePath)}`);
           return true;
         }
-
-        console.log('  → 파일 입력 요소 찾기 실패');
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(500);
       }
-    } else {
-      console.log('  → 이미지 버튼 찾기 실패');
     }
     return false;
   } catch (error) {
     console.log(`  → 이미지 업로드 실패: ${error.message}`);
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(500);
     return false;
   }
 }
 
-// 사용 가능한 제품 이미지 목록 가져오기
-function getAvailableProductImages() {
-  const images = [];
-  if (fs.existsSync(PRODUCT_IMAGES_DIR)) {
-    const files = fs.readdirSync(PRODUCT_IMAGES_DIR);
-    for (const file of files) {
-      if (file.match(/product_\d+\.jpg$/)) {
-        images.push(path.join(PRODUCT_IMAGES_DIR, file));
-      }
-    }
-  }
-  return images.sort();
-}
-
-async function writeBlogPost() {
+// ============================================
+// 8. 메인 블로그 작성 함수
+// ============================================
+async function writeBlogPost(productUrl) {
   console.log('=== 블로그 자동 작성 시작 ===\n');
 
-  // 이미지 준비 상태 확인
-  const productImages = getAvailableProductImages();
-  if (productImages.length > 0) {
-    console.log(`✅ 제품 이미지 ${productImages.length}개 준비됨`);
-    productImages.forEach((img, i) => console.log(`   ${i + 1}. ${path.basename(img)}`));
-  } else {
-    console.log('⚠️  제품 이미지 없음 - 먼저 image_handler.js를 실행하세요!');
-    console.log('   node image_handler.js\n');
-    console.log('이미지 없이 진행합니다...\n');
-  }
-
+  // 브라우저 실행 (로그인 후 이미지 다운로드 + 제품정보 크롤링)
   const browser = await chromium.launch({
     headless: false,
     slowMo: 20
@@ -463,9 +707,57 @@ async function writeBlogPost() {
   const page = await context.newPage();
 
   try {
+    // 1. 네이버 로그인
     await naverLogin(page);
 
-    console.log('블로그 글쓰기 페이지 이동...');
+    // 2. 이미지 다운로드 (로그인 상태에서)
+    const productImages = await scrapeAndDownloadImages(page, productUrl);
+    console.log(`🖼️  다운로드된 이미지: ${productImages.length}장`);
+
+    // 3. 제품 정보 크롤링 (같은 세션에서)
+    console.log('\n=== 제품 정보 수집 ===');
+    await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    const productInfo = await page.evaluate(() => {
+      const getText = (selector) => {
+        const el = document.querySelector(selector);
+        return el ? el.textContent.trim() : '';
+      };
+
+      const getTexts = (selector) => {
+        const els = document.querySelectorAll(selector);
+        return Array.from(els).map(el => el.textContent.trim()).filter(t => t);
+      };
+
+      const productName = getText('._3oDjSvLwwi, .product-title, h2._22kNQuEXmb, [class*="ProductName"]') ||
+                          getText('h1, h2') || '제품명 없음';
+      const price = getText('._1LY7DqCnwR, .product-price, ._1lyw6G67B3, [class*="Price"]') ||
+                    getText('[class*="price"]') || '가격 정보 없음';
+      const salePrice = getText('._2pgHN-ntx6, .sale-price, [class*="SalePrice"]') || price;
+      const brand = getText('._1vVKjJByMy, .brand-name, [class*="Brand"]') ||
+                    getText('[class*="mall"], [class*="store"]') || '';
+      const description = getText('._1RnNDNAvWS, .product-description, [class*="Description"]') ||
+                          getText('[class*="detail"], [class*="info"]') || '';
+      const reviewCount = getText('._2PQrR3RDAE, [class*="review-count"], [class*="ReviewCount"]') || '0';
+      const rating = getText('._1ApVZR0iHM, [class*="rating"], [class*="Rating"]') || '';
+      const features = getTexts('[class*="option"], [class*="feature"], [class*="spec"] li');
+      const category = getText('[class*="category"], [class*="breadcrumb"]') || '';
+
+      return { productName, price, salePrice, brand, description, reviewCount, rating, features: features.slice(0, 10), category, url: window.location.href };
+    });
+
+    console.log(`📦 제품명: ${productInfo.productName}`);
+    console.log(`💰 가격: ${productInfo.salePrice}`);
+
+    // 4. Gemini로 원고 생성
+    const blogContent = await generateBlogContent(productInfo);
+    console.log(`\n📝 생성된 제목: ${blogContent.title}`);
+
+    // 5. 이미지를 섹션에 배치 (첫 번째 고정 + 나머지 랜덤)
+    const sectionsWithImages = insertImagesIntoSections(blogContent.sections, productImages.length);
+
+    console.log('\n블로그 글쓰기 페이지 이동...');
     await page.goto(BLOG_WRITE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(5000);
 
@@ -474,30 +766,26 @@ async function writeBlogPost() {
       console.log('mainFrame을 찾을 수 없습니다.');
       return;
     }
-    console.log('mainFrame 발견!');
 
     // 팝업 닫기
     await page.waitForTimeout(2000);
     try {
-      const confirmPopup = await mainFrame.$('.se-popup-alert-confirm .se-popup-button-confirm, .se-popup-alert .se-popup-button');
+      const confirmPopup = await mainFrame.$('.se-popup-alert-confirm .se-popup-button-confirm');
       if (confirmPopup) {
         await confirmPopup.click();
-        console.log('확인 팝업 닫기');
         await page.waitForTimeout(500);
       }
-      const helpCloseBtn = await mainFrame.$('button.se-help-panel-close-button, .se-popup-close-button');
+      const helpCloseBtn = await mainFrame.$('button.se-help-panel-close-button');
       if (helpCloseBtn) {
         await helpCloseBtn.click();
-        console.log('도움말 창 닫기');
         await page.waitForTimeout(500);
       }
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
     } catch (e) {}
 
-    // === 제목 입력 ===
+    // 제목 입력
     console.log('\n=== 제목 입력 ===');
-    const titleArea = await mainFrame.$('.se-documentTitle .se-text-paragraph, .se-title-text');
+    const titleArea = await mainFrame.$('.se-documentTitle .se-text-paragraph');
     if (titleArea) {
       await titleArea.click();
       await page.waitForTimeout(500);
@@ -507,53 +795,30 @@ async function writeBlogPost() {
 
     await page.waitForTimeout(700);
 
-    // === 본문 영역으로 이동 ===
+    // 본문 영역 이동
     console.log('\n=== 본문 영역으로 이동 ===');
-
-    // 본문 클릭
     const contentArea = await mainFrame.$('.se-component.se-text .se-text-paragraph');
     if (contentArea) {
       await contentArea.click();
-      console.log('본문 영역 클릭');
     } else {
       await page.keyboard.press('Tab');
-      console.log('Tab으로 본문 이동');
     }
     await page.waitForTimeout(500);
 
-    // 정렬은 사용자 기본 설정으로 사용
-    await page.waitForTimeout(300);
-
-    // === 본문 작성 ===
+    // 본문 작성
     console.log('\n=== 본문 입력 시작 ===');
 
-    // 제품 이미지 목록 가져오기
-    const productImages = getAvailableProductImages();
-    let imageIndex = 0;
-    console.log(`사용 가능한 제품 이미지: ${productImages.length}개`);
-
-    for (let i = 0; i < blogContent.sections.length; i++) {
-      const section = blogContent.sections[i];
-      console.log(`섹션 ${i + 1}/${blogContent.sections.length}: ${section.type}`);
+    for (let i = 0; i < sectionsWithImages.length; i++) {
+      const section = sectionsWithImages[i];
+      console.log(`섹션 ${i + 1}/${sectionsWithImages.length}: ${section.type}`);
 
       switch (section.type) {
-        case 'image_marker':
-          // 제품 이미지가 있으면 업로드, 없으면 텍스트 마커 표시
-          if (productImages.length > 0 && imageIndex < productImages.length) {
-            const imagePath = productImages[imageIndex];
-            const uploaded = await uploadImage(page, mainFrame, imagePath);
+        case 'image':
+          if (productImages[section.index]) {
+            const uploaded = await uploadImage(page, mainFrame, productImages[section.index]);
             if (uploaded) {
-              imageIndex++;
-              await page.keyboard.press('Enter'); // 이미지 후 줄바꿈
-            } else {
-              // 업로드 실패 시 텍스트 마커 표시
-              await page.keyboard.type(section.content, { delay: 15 });
               await page.keyboard.press('Enter');
             }
-          } else {
-            // 이미지 없으면 사용자 안내 메시지
-            await page.keyboard.type('📷 [사용자 이미지 삽입 필요]', { delay: 15 });
-            await page.keyboard.press('Enter');
           }
           break;
 
@@ -576,8 +841,10 @@ async function writeBlogPost() {
         case 'notice':
         case 'text':
         default:
-          await page.keyboard.type(section.content, { delay: 15 });
-          await page.keyboard.press('Enter');
+          if (section.content) {
+            await page.keyboard.type(section.content, { delay: 15 });
+            await page.keyboard.press('Enter');
+          }
           break;
       }
 
@@ -586,69 +853,28 @@ async function writeBlogPost() {
 
     console.log('\n=== 본문 입력 완료 ===');
 
-    // 모든 팝업/패널 닫기
+    // 팝업 닫기
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(500);
-
-    // 스티커 패널 닫기
-    try {
-      const stickerCloseBtn = await mainFrame.$('.se-sidebar-close-button, button[aria-label="닫기"]');
-      if (stickerCloseBtn) {
-        await stickerCloseBtn.click();
-        await page.waitForTimeout(500);
-      }
-    } catch (e) {}
 
     // 스크린샷
-    await page.waitForTimeout(1000);
     await page.screenshot({ path: 'output/blog_written.png', fullPage: true });
     console.log('스크린샷: output/blog_written.png');
 
-    // === 발행 버튼 클릭 ===
+    // 발행 버튼
     console.log('\n=== 발행 프로세스 시작 ===');
-
-    // 발행 버튼 클릭
-    const publishBtn = await mainFrame.$('button.publish_btn__Y5YlZ, button[class*="publish"], .se-publish-button');
+    const publishBtn = await mainFrame.$('button.publish_btn__Y5YlZ, button[class*="publish"]');
     if (publishBtn) {
       await publishBtn.click();
       console.log('발행 버튼 클릭');
       await page.waitForTimeout(2000);
-    } else {
-      // 상단 발행 버튼 찾기 (mainFrame 밖에 있을 수 있음)
-      const topPublishBtn = await page.$('button.publish_btn__Y5YlZ, button[class*="publish"]');
-      if (topPublishBtn) {
-        await topPublishBtn.click();
-        console.log('상단 발행 버튼 클릭');
-        await page.waitForTimeout(2000);
-      }
     }
 
-    // === 해시태그 입력 ===
+    // 해시태그 입력
     console.log('\n=== 해시태그 입력 ===');
+    const hashtags = extractHashtags(productInfo);
 
-    // 상품 관련 해시태그 (10~20개)
-    const hashtags = [
-      '니트원피스',
-      '겨울원피스',
-      '데일리룩',
-      '여성패션',
-      '가성비원피스',
-      '셔링원피스',
-      '하프넥원피스',
-      '아뜨랑스',
-      '겨울코디',
-      '출근룩',
-      '데이트룩',
-      '플레어원피스',
-      '니트코디',
-      '여자겨울옷',
-      '원피스추천'
-    ];
-
-    // 해시태그 입력 영역 찾기
-    const hashtagInput = await mainFrame.$('input[placeholder*="태그"], input[placeholder*="해시태그"], .tag_input input, input[class*="tag"]');
+    const hashtagInput = await mainFrame.$('input[placeholder*="태그"], input[placeholder*="해시태그"]');
     if (hashtagInput) {
       for (const tag of hashtags) {
         await hashtagInput.click();
@@ -656,28 +882,12 @@ async function writeBlogPost() {
         await page.keyboard.type(tag, { delay: 30 });
         await page.keyboard.press('Enter');
         await page.waitForTimeout(300);
-        console.log(`  → 해시태그 추가: #${tag}`);
-      }
-    } else {
-      // 다른 방식으로 해시태그 입력 시도
-      const tagArea = await mainFrame.$('[class*="tag"] input, .se-tag-input');
-      if (tagArea) {
-        await tagArea.click();
-        for (const tag of hashtags) {
-          await page.keyboard.type(tag, { delay: 30 });
-          await page.keyboard.press('Enter');
-          await page.waitForTimeout(300);
-          console.log(`  → 해시태그 추가: #${tag}`);
-        }
-      } else {
-        console.log('해시태그 입력 영역을 찾을 수 없습니다.');
+        console.log(`  → 해시태그: #${tag}`);
       }
     }
 
     console.log(`\n총 ${hashtags.length}개 해시태그 입력 완료`);
 
-    // 발행 설정 스크린샷
-    await page.waitForTimeout(1000);
     await page.screenshot({ path: 'output/blog_publish_ready.png', fullPage: true });
     console.log('발행 준비 스크린샷: output/blog_publish_ready.png');
 
@@ -696,4 +906,70 @@ async function writeBlogPost() {
   }
 }
 
-writeBlogPost();
+// 제품 정보에서 해시태그 추출
+function extractHashtags(productInfo) {
+  const baseTags = ['데일리룩', '여성패션', '추천템', '솔직후기'];
+
+  // 제품명에서 키워드 추출
+  const productName = productInfo.productName || '';
+  const keywords = productName.split(/[\s,\/]+/).filter(w => w.length >= 2 && w.length <= 10);
+
+  // 카테고리에서 추출
+  const category = productInfo.category || '';
+  const categoryWords = category.split(/[\s,>\/]+/).filter(w => w.length >= 2);
+
+  // 브랜드
+  const brand = productInfo.brand ? [productInfo.brand] : [];
+
+  const allTags = [...new Set([...baseTags, ...keywords.slice(0, 5), ...categoryWords.slice(0, 3), ...brand])];
+
+  return allTags.slice(0, 15); // 최대 15개
+}
+
+// ============================================
+// 메인 실행 (자동 상품 선택)
+// ============================================
+async function main() {
+  console.log('╔════════════════════════════════════════╗');
+  console.log('║   네이버 블로그 자동 글쓰기            ║');
+  console.log('║   Gemini AI + 자동 상품 선택           ║');
+  console.log('╚════════════════════════════════════════╝\n');
+
+  // 상품 로드
+  const products = loadProducts();
+  const posted = loadPostedProducts();
+
+  log(`총 상품: ${products.length}개, 블로그 게시됨: ${posted.size}개`);
+
+  // affiliateLink가 있는 상품만 필터링
+  const available = products.filter(p => p.affiliateLink);
+
+  if (available.length === 0) {
+    log('게시 가능한 상품이 없습니다. product_links.json을 확인하세요.');
+    process.exit(1);
+  }
+
+  // 카운트 낮은 것 우선 정렬
+  const sorted = sortProductsByCount(available, posted);
+  const selected = sorted[0];
+  const currentCount = posted.get(selected.productId) || 0;
+
+  log(`\n선택된 상품: ${selected.name.substring(0, 40)}...`);
+  log(`게시 횟수: ${currentCount}회`);
+  log(`URL: ${selected.productUrl}`);
+
+  // 블로그 글 작성
+  await writeBlogPost(selected.productUrl);
+
+  // 게시 카운트 업데이트
+  posted.set(selected.productId, currentCount + 1);
+  savePostedProducts(posted);
+  log(`게시 카운트 업데이트: ${currentCount} -> ${currentCount + 1}`);
+
+  log('\n블로그 글 작성 완료!');
+}
+
+main().catch(err => {
+  log(`오류: ${err.message}`);
+  process.exit(1);
+});

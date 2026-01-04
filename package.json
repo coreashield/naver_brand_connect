@@ -23,6 +23,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.2.3",
     "playwright": "^1.57.0",
     "sharp": "^0.34.5"
@@ -34,9 +35,15 @@
     "node": ">=18.0.0"
   },
   "pkg": {
-    "scripts": ["title_suffixes.js"],
-    "assets": [".env"],
-    "targets": ["node18-win-x64"],
+    "scripts": [
+      "title_suffixes.js"
+    ],
+    "assets": [
+      ".env"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
     "outputPath": "dist"
   }
 }

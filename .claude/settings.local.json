@@ -21,7 +21,12 @@
       "Bash(mkdir:*)",
       "mcp__playwright__browser_navigate",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: Naver Brand Connect automation tools\n\nFeatures:\n- Cafe auto-posting \\(cafe_writer.js\\)\n- Blog auto-posting \\(blog_writer.js, app.js\\)\n- Product link crawler \\(link_crawler.js\\)\n- Portable package support for VM deployment\n- Environment-based configuration \\(.env\\)\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(xcopy:*)",
+      "Bash(export PLAYWRIGHT_BROWSERS_PATH=\"./browsers\")",
+      "Bash(npx playwright install chromium)",
+      "Bash(curl:*)"
     ]
   }
 }
