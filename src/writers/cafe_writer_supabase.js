@@ -1,3 +1,8 @@
+/**
+ * 카페 자동 글쓰기 - Supabase 버전
+ * 분산 환경에서 중복 없이 작업 가능
+ */
+
 import { chromium } from 'playwright';
 import dotenv from 'dotenv';
 import fs from 'fs';
@@ -5,6 +10,13 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  getProductsForPosting,
+  recordPost,
+  registerWorker,
+  updateWorkerHeartbeat,
+  testConnection
+} from '../supabase/db.js';
 
 dotenv.config();
 
@@ -12,12 +24,10 @@ const NAVER_ID = process.env.NAVER_ID?.trim();
 const NAVER_PW = process.env.NAVER_PW?.trim();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
 const CAFE_WRITE_URL = process.env.CAFE_ADR?.trim() || 'https://cafe.naver.com/ca-fe/cafes/31634939/articles/write?boardType=L';
+const WORKER_NAME = process.env.WORKER_NAME || `cafe-${Date.now().toString(36)}`;
 
-const PRODUCT_FILE = 'output/product_links.json';
-const POSTED_FILE = 'output/posted_products.json';
 const LOG_FILE = 'output/cafe_writer.log';
 const IMAGE_DIR = 'output/images';
-const TEMP_HTML = 'output/temp_content.html';
 
 // Gemini API 초기화
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -38,51 +48,6 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-}
-
-function loadProducts() {
-  try {
-    if (fs.existsSync(PRODUCT_FILE)) {
-      return JSON.parse(fs.readFileSync(PRODUCT_FILE, 'utf-8'));
-    }
-  } catch (e) {
-    log(`상품 로드 오류: ${e.message}`);
-  }
-  return [];
-}
-
-// 게시 카운트 로드 (productId -> count)
-function loadPostedProducts() {
-  try {
-    if (fs.existsSync(POSTED_FILE)) {
-      const data = JSON.parse(fs.readFileSync(POSTED_FILE, 'utf-8'));
-      // 기존 Set 형식이면 Map으로 변환
-      if (Array.isArray(data)) {
-        const map = new Map();
-        data.forEach(id => map.set(id, 1));
-        return map;
-      }
-      return new Map(Object.entries(data));
-    }
-  } catch (e) {}
-  return new Map();
-}
-
-// 게시 카운트 저장
-function savePostedProducts(posted) {
-  ensureDir('output');
-  const obj = Object.fromEntries(posted);
-  fs.writeFileSync(POSTED_FILE, JSON.stringify(obj, null, 2), 'utf-8');
-}
-
-// 상품 정렬 (카운트 낮은 것 우선, 같으면 랜덤)
-function sortProductsByCount(products, postedCounts) {
-  return [...products].sort((a, b) => {
-    const countA = postedCounts.get(a.productId) || 0;
-    const countB = postedCounts.get(b.productId) || 0;
-    if (countA !== countB) return countA - countB; // 카운트 낮은 것 우선
-    return Math.random() - 0.5; // 같으면 랜덤
-  });
 }
 
 // 이미지 다운로드 (크기 검증 포함)
@@ -146,31 +111,49 @@ async function getSmartStoreImages(page, storeUrl) {
     await productPage.goto(storeUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await productPage.waitForTimeout(3000);
 
-    // 스마트스토어 상품 대표 이미지 (썸네일 슬라이더)
     const mainImages = await productPage.$$eval('img', imgs => {
       return imgs
-        .map(img => img.src || img.getAttribute('data-src') || '')
-        .filter(src => src && src.includes('http'))
-        .filter(src =>
-          src.includes('pstatic.net') ||
-          src.includes('shop-phinf') ||
-          src.includes('shopping-phinf') ||
-          src.includes('shop.pstatic')
+        .map(img => ({
+          src: img.src || img.getAttribute('data-src') || '',
+          width: img.naturalWidth || img.width || 0,
+          height: img.naturalHeight || img.height || 0,
+          className: img.className || '',
+          parentClass: img.parentElement?.className || ''
+        }))
+        .filter(img => img.src && img.src.includes('http'))
+        .filter(img =>
+          img.src.includes('shop-phinf') ||
+          img.src.includes('shopping-phinf')
         )
-        .filter(src =>
-          !src.includes('logo') &&
-          !src.includes('icon') &&
-          !src.includes('sprite') &&
-          !src.includes('blank') &&
-          !src.includes('avatar') &&
-          !src.includes('error') &&
-          !src.includes('noimage') &&
-          !src.includes('no_image') &&
-          !src.includes('placeholder')
+        .filter(img =>
+          !img.src.includes('logo') &&
+          !img.src.includes('icon') &&
+          !img.src.includes('sprite') &&
+          !img.src.includes('blank') &&
+          !img.src.includes('avatar') &&
+          !img.src.includes('profile') &&
+          !img.src.includes('seller') &&
+          !img.src.includes('member') &&
+          !img.src.includes('user') &&
+          !img.src.includes('error') &&
+          !img.src.includes('noimage') &&
+          !img.src.includes('no_image') &&
+          !img.src.includes('placeholder') &&
+          !img.src.includes('type=f40') &&
+          !img.src.includes('type=f50') &&
+          !img.src.includes('type=f60') &&
+          !img.src.includes('type=s40') &&
+          !img.src.includes('type=s50')
         )
-        .map(src => {
-          // 고화질 이미지로 변환 (썸네일 -> 원본)
-          return src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
+        .filter(img =>
+          !img.className.includes('profile') &&
+          !img.className.includes('seller') &&
+          !img.className.includes('avatar') &&
+          !img.parentClass.includes('profile') &&
+          !img.parentClass.includes('seller')
+        )
+        .map(img => {
+          return img.src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
         })
         .filter((src, idx, arr) => arr.indexOf(src) === idx)
         .slice(0, 5);
@@ -191,7 +174,6 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
   let imageUrls = [];
 
   try {
-    // 1. affiliateLink가 있으면 실제 스마트스토어로 이동해서 이미지 가져오기
     if (affiliateLink && affiliateLink.includes('naver.me')) {
       log(`  affiliateLink에서 실제 스토어 URL 추출 중...`);
       const realUrl = await getRedirectUrl(page, affiliateLink);
@@ -203,50 +185,61 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
       }
     }
 
-    // 2. 스마트스토어에서 못 찾으면 Brand Connect 페이지에서 시도
     if (imageUrls.length === 0) {
       log(`  Brand Connect 페이지에서 이미지 검색...`);
       const productPage = await page.context().newPage();
       await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
       await productPage.waitForTimeout(3000);
-
-      // 스크롤해서 이미지 로드 유도
       await productPage.evaluate(() => window.scrollBy(0, 500));
       await productPage.waitForTimeout(2000);
 
-      // Brand Connect 페이지에서 이미지 수집
-      imageUrls = await productPage.$$eval('img', imgs => {
-        return imgs
-          .map(img => img.src || img.getAttribute('data-src') || '')
-          .filter(src => src && src.includes('http'))
-          .filter(src =>
-            src.includes('phinf') ||
-            src.includes('shop') ||
-            src.includes('product') ||
-            src.includes('goods') ||
-            src.includes('pstatic')
-          )
-          .filter(src =>
-            !src.includes('logo') &&
-            !src.includes('icon') &&
-            !src.includes('sprite') &&
-            !src.includes('blank') &&
-            !src.includes('avatar') &&
-            !src.includes('error') &&
-            !src.includes('noimage') &&
-            !src.includes('no_image') &&
-            !src.includes('placeholder') &&
-            !src.includes('exclamation')
-          )
-          .filter((src, idx, arr) => arr.indexOf(src) === idx)
-          .slice(0, 5);
+      imageUrls = await productPage.evaluate(() => {
+        const urls = [];
+        const selectors = [
+          '.Thumbnail_img__midGQ',
+          '[class*="Thumbnail"] img',
+          'img[class*="ImageLazyLoader"]',
+          'img[src*="phinf"]',
+          'img[src*="shop"]',
+          'img[src*="product"]'
+        ];
+
+        for (const selector of selectors) {
+          const images = document.querySelectorAll(selector);
+          images.forEach(img => {
+            let src = img.src || img.getAttribute('data-src');
+            if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
+              if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
+                  src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
+                  src.includes('icon') || src.includes('blank') || src.includes('avatar') ||
+                  src.includes('Badge') || src.includes('badge') || src.includes('_next/static/media')) {
+                return;
+              }
+
+              if (src.includes('dthumb-phinf.pstatic.net') && src.includes('src=')) {
+                try {
+                  const urlParams = new URL(src).searchParams;
+                  let originalSrc = urlParams.get('src');
+                  if (originalSrc) {
+                    originalSrc = decodeURIComponent(originalSrc).replace(/^"|"$/g, '');
+                    src = originalSrc;
+                  }
+                } catch (e) {}
+              }
+
+              if (src.startsWith('//')) src = 'https:' + src;
+              src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
+              if (!urls.includes(src)) urls.push(src);
+            }
+          });
+        }
+        return urls.slice(0, 5);
       });
 
       log(`  Brand Connect 이미지 발견: ${imageUrls.length}개`);
       await productPage.close();
     }
 
-    // 3. 이미지 다운로드 (크기 검증 포함)
     let downloadedCount = 0;
     for (let i = 0; i < imageUrls.length && downloadedCount < 3; i++) {
       try {
@@ -257,7 +250,6 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
         log(`  이미지 다운로드 성공: ${filename}`);
       } catch (e) {
         log(`  이미지 다운로드 스킵: ${e.message}`);
-        // 실패하면 다음 URL 시도
       }
     }
 
@@ -272,28 +264,70 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
   return images;
 }
 
-// 볼드 처리하며 텍스트 입력 (** 감싸진 부분은 Ctrl+B)
+// 인용구 스타일 인덱스 (순환)
+let quoteStyleIndex = 0;
+
+// 인용구 입력 (Ctrl+Alt+Q)
+async function insertQuote(page, text) {
+  await page.keyboard.press('Control+Alt+q');
+  await page.waitForTimeout(500);
+
+  const styleCount = quoteStyleIndex % 3;
+  for (let i = 0; i < styleCount; i++) {
+    await page.keyboard.press('Control+Alt+q');
+    await page.waitForTimeout(300);
+  }
+  quoteStyleIndex++;
+
+  if (text.length > 40) {
+    const words = text.split(' ');
+    let currentLine = '';
+    for (const word of words) {
+      if ((currentLine + ' ' + word).length > 40) {
+        await page.keyboard.type(currentLine.trim(), { delay: 15 });
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(100);
+        currentLine = word;
+      } else {
+        currentLine += ' ' + word;
+      }
+    }
+    if (currentLine.trim()) {
+      await page.keyboard.type(currentLine.trim(), { delay: 15 });
+    }
+  } else {
+    await page.keyboard.type(text, { delay: 15 });
+  }
+
+  await page.waitForTimeout(300);
+
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(50);
+  }
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(500);
+}
+
+// 볼드 처리하며 텍스트 입력
 async function typeWithBold(page, text) {
-  // **볼드** 패턴을 찾아서 분리
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
 
   for (const part of parts) {
     if (part.startsWith('**') && part.endsWith('**')) {
-      // 볼드 텍스트
       const boldText = part.slice(2, -2);
-      await page.keyboard.press('Control+b'); // 볼드 시작
+      await page.keyboard.press('Control+b');
       await page.waitForTimeout(100);
       await page.keyboard.type(boldText, { delay: 15 });
-      await page.keyboard.press('Control+b'); // 볼드 해제
+      await page.keyboard.press('Control+b');
       await page.waitForTimeout(100);
     } else if (part) {
-      // 일반 텍스트
       await page.keyboard.type(part, { delay: 10 });
     }
   }
 }
 
-// 해시태그 생성 (상품명에서 키워드 추출)
+// 해시태그 생성
 function generateHashtags(productName) {
   const keywords = productName
     .replace(/[\[\]\(\)\/\+\-\d]+/g, ' ')
@@ -338,6 +372,14 @@ async function generateContentWithGemini(product) {
 - 강조하고 싶은 부분은 **볼드**로 표시 (예: **가성비 최고**, **품절 임박**)
 - 볼드는 핵심 키워드에만 사용 (전체 3~5개 정도)
 - ##, -, * 리스트 등 다른 마크다운은 사용 금지
+- 중요한 핵심 메시지 2~3개는 반드시 [QUOTE]내용[/QUOTE] 형식으로 감싸주세요 (인용구로 강조됨)
+- [QUOTE] 태그는 한 줄에 하나씩만 사용하고, 태그 안에 줄바꿈 넣지 마세요
+
+[모바일 최적화 - 중요!]
+- 한 문장은 최대 40자 이내로 짧게 작성
+- 2~3문장마다 빈 줄(줄바꿈) 넣어서 문단 구분
+- 모바일에서 읽기 편하게 짧은 문장 위주로 작성
+- 긴 설명은 여러 줄로 나눠서 작성
 
 [절대 포함하면 안 되는 내용]
 - "직접 구매했다", "직접 써봤다", "사용해봤다" 등 본인이 구매/사용했다는 표현
@@ -367,23 +409,20 @@ async function generateContentWithGemini(product) {
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
 
-    // 파싱
     const titleMatch = responseText.match(/\[TITLE\]\s*([\s\S]*?)(?=\[CONTENT\])/i);
     const contentMatch = responseText.match(/\[CONTENT\]\s*([\s\S]*)/i);
 
     let title = titleMatch ? titleMatch[1].trim() : `${product.name} 추천합니다`;
     let content = contentMatch ? contentMatch[1].trim() : '';
 
-    // 제목에서 이모지/특수문자 제거 (느낌표, 물음표, 괄호, 쉼표, 마침표만 허용)
     title = title.replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣!?,.\[\]\(\)]/g, '').trim();
 
-    // 본문에서 마크다운 문법 제거 (볼드 **는 유지)
     content = content
-      .replace(/(?<!\*)\*(?!\*)/g, '') // 단일 * 이탤릭만 제거 (** 볼드는 유지)
-      .replace(/^#+\s*/gm, '')        // ## 헤더 제거
-      .replace(/^-\s+/gm, '')         // - 리스트 제거
-      .replace(/^\d+\.\s+/gm, '')     // 1. 숫자 리스트 제거
-      .replace(/`/g, '')              // 백틱 제거
+      .replace(/(?<!\*)\*(?!\*)/g, '')
+      .replace(/^#+\s*/gm, '')
+      .replace(/^-\s+/gm, '')
+      .replace(/^\d+\.\s+/gm, '')
+      .replace(/`/g, '')
       .trim();
 
     log(`  Gemini 생성 완료 (제목: ${title.substring(0, 30)}...)`);
@@ -391,7 +430,6 @@ async function generateContentWithGemini(product) {
     return { title, content };
   } catch (error) {
     log(`  Gemini API 오류: ${error.message}`);
-    // 폴백: 기본 제목/내용
     return {
       title: `${product.name} 강력 추천`,
       content: `요즘 SNS에서 핫한 상품 발견했어요~\n\n${product.name}\n\n가성비 좋고 품질도 좋다고 소문난 제품이에요.\n지금 할인 중이라 이 가격에 구매하기 힘들 수도 있어요.\n\n관심 있으신 분들은 빨리 확인해보세요~`
@@ -399,49 +437,16 @@ async function generateContentWithGemini(product) {
   }
 }
 
-// HTML 콘텐츠 생성 (Gemini 결과 사용) - 링크는 별도 입력
-function generateHtmlContent(product, geminiContent) {
-  const contentLines = geminiContent.split('\n').map(line =>
-    line.trim() ? `<p style="margin:12px 0; line-height:2; font-size:16px; color:#333;">${line}</p>` : '<p><br></p>'
-  ).join('');
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-</head>
-<body style="font-family: '맑은 고딕', sans-serif; font-size: 16px; line-height: 1.8;">
-  <p style="color:#e74c3c; font-size:14px; font-weight:bold; margin-bottom:20px; padding:10px; background:#fff5f5; border-left:3px solid #e74c3c;">${DISCLOSURE}</p>
-
-  <div style="margin: 25px 0;">
-    ${contentLines}
-  </div>
-
-  <div style="margin-top:30px; padding:20px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:12px; text-align:center;">
-    <p style="margin:0 0 10px 0; color:#333; font-size:18px; font-weight:bold;">지금 바로 확인해보세요!</p>
-    <p style="margin:0; color:#667eea; font-size:16px; font-weight:bold;">아래 링크를 클릭하세요</p>
-  </div>
-
-  <p style="margin-top:20px; color:#888; font-size:13px; text-align:center;">좋은 정보가 되셨다면 좋아요와 댓글 부탁드려요~</p>
-</body>
-</html>`;
-
-  return html;
-}
-
 // 카페 글 작성
 async function writePost(page, product, images, doLoginFn) {
   try {
     log(`글 작성 시작: ${product.name.substring(0, 30)}...`);
 
-    // Gemini로 제목과 본문 생성
     const geminiResult = await generateContentWithGemini(product);
 
-    // 카페 글쓰기 페이지로 이동
     await page.goto(CAFE_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    // 로그인 상태 체크 (세션 만료 대응)
     const currentUrl = page.url();
     if (currentUrl.includes('nidlogin') || currentUrl.includes('login')) {
       log('  세션 만료 - 재로그인...');
@@ -452,7 +457,7 @@ async function writePost(page, product, images, doLoginFn) {
 
     await page.waitForTimeout(1000);
 
-    // 게시판 선택 (드롭다운 클릭 후 첫 번째 게시판 선택)
+    // 게시판 선택
     try {
       const boardDropdown = page.locator('text=게시판을 선택해 주세요.').first();
       if (await boardDropdown.count() > 0) {
@@ -465,17 +470,13 @@ async function writePost(page, product, images, doLoginFn) {
           await boardOption.click();
           await page.waitForTimeout(500);
           log(`  ✅ 게시판 선택 완료 (자유게시판)`);
-        } else {
-          log(`  ⚠️ 자유게시판 옵션 못찾음`);
         }
-      } else {
-        log(`  ⚠️ 게시판 드롭다운 못찾음`);
       }
     } catch (e) {
       log(`  게시판 선택 오류: ${e.message}`);
     }
 
-    // 제목 입력 (Gemini 생성 제목 사용)
+    // 제목 입력
     const title = geminiResult.title;
     const titleInput = page.locator('textarea.textarea_input, textarea[placeholder*="제목"]');
     await titleInput.fill(title);
@@ -487,160 +488,209 @@ async function writePost(page, product, images, doLoginFn) {
     await editorBody.click();
     await page.waitForTimeout(500);
 
-    // 1. 이미지 먼저 업로드 (filechooser 이벤트 사용)
-    if (images.length > 0) {
-      log(`  이미지 업로드 중...`);
+    // 이미지 업로드 헬퍼 함수
+    async function uploadSingleImage(imagePath) {
       try {
-        // filechooser 이벤트 대기 + 사진 버튼 클릭
         const [fileChooser] = await Promise.all([
           page.waitForEvent('filechooser', { timeout: 10000 }),
           page.locator('button[data-name="image"]').click()
         ]);
+        await fileChooser.setFiles([imagePath]);
+        await page.waitForTimeout(3000);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(500);
+        await editorBody.click();
+        await page.waitForTimeout(500);
+        return true;
+      } catch (e) {
+        log(`    이미지 업로드 실패: ${e.message}`);
+        return false;
+      }
+    }
 
-        // 파일 선택
-        await fileChooser.setFiles(images);
-        log(`  파일 선택 완료: ${images.length}개`);
+    // === 순서대로 작업 ===
 
-        // 이미지 2장 이상이면 "개별사진/콜라주" 선택 창 나옴
-        if (images.length >= 2) {
+    // 1. 대가성 문구 먼저 입력
+    log(`  [1/6] 대가성 문구 입력...`);
+    await page.keyboard.type(DISCLOSURE, { delay: 15 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+
+    // 2. 첫 번째 이미지만 업로드
+    if (images.length > 0) {
+      log(`  [2/6] 첫 번째 이미지 업로드...`);
+      await uploadSingleImage(images[0]);
+      await page.waitForTimeout(1000);
+      log(`  ✅ 첫 번째 이미지 업로드 완료`);
+    }
+
+    // 3. 에디터 클릭하고 본문 시작 위치로
+    await editorBody.click();
+    await page.waitForTimeout(500);
+    await page.keyboard.press('End');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+
+    // 4. 본문 직접 입력 (볼드 + 인용구 처리 포함)
+    log(`  [3/6] 본문 입력 중...`);
+
+    let content = geminiResult.content;
+
+    // 다양한 QUOTE 태그 변형을 표준화
+    content = content.replace(/\[QOU?TE\]/gi, '[QUOTE]');
+    content = content.replace(/\[?\/QOU?TE\]/gi, '[/QUOTE]');
+    content = content.replace(/<\/QOU?TE\]/gi, '[/QUOTE]');
+
+    const quoteCount = (content.match(/\[QUOTE\]/gi) || []).length;
+    log(`    → QUOTE 태그 발견: ${quoteCount}개`);
+
+    const quoteRegex = /\[QUOTE\]([\s\S]*?)\[\/QUOTE\]/gi;
+
+    let lastIndex = 0;
+    let match;
+    const parts = [];
+
+    while ((match = quoteRegex.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+      }
+      parts.push({ type: 'quote', content: match[1].trim() });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < content.length) {
+      parts.push({ type: 'text', content: content.slice(lastIndex) });
+    }
+
+    for (const part of parts) {
+      if (part.type === 'quote') {
+        await insertQuote(page, part.content);
+        log(`    → 인용구 삽입 완료`);
+        await page.waitForTimeout(300);
+      } else {
+        const lines = part.content.split('\n');
+        for (const line of lines) {
+          if (line.trim()) {
+            await typeWithBold(page, line);
+            await page.waitForTimeout(100);
+          }
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(100);
+        }
+      }
+    }
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+    log(`  ✅ 본문 입력 완료`);
+
+    // 5. 나머지 이미지 업로드 (2번째, 3번째)
+    if (images.length > 1) {
+      log(`  [4/6] 나머지 이미지 업로드...`);
+      const remainingImages = images.slice(1);
+
+      try {
+        const [fileChooser] = await Promise.all([
+          page.waitForEvent('filechooser', { timeout: 10000 }),
+          page.locator('button[data-name="image"]').click()
+        ]);
+        await fileChooser.setFiles(remainingImages);
+        log(`    파일 선택 완료: ${remainingImages.length}개`);
+
+        if (remainingImages.length >= 2) {
           await page.waitForTimeout(2000);
-
-          // "개별사진" 버튼 클릭
           const individualBtn = page.locator('text=개별사진').first();
           if (await individualBtn.count() > 0) {
             await individualBtn.click();
-            log(`  개별사진 선택`);
+            log(`    개별사진 선택`);
             await page.waitForTimeout(1000);
           }
         }
 
-        // 이미지가 에디터에 삽입될 때까지 대기
         await page.waitForTimeout(3000);
-
-        // ESC 여러 번 눌러서 팝업 확실히 닫기
         await page.keyboard.press('Escape');
         await page.waitForTimeout(500);
         await page.keyboard.press('Escape');
         await page.waitForTimeout(500);
-
-        // 에디터 본문 클릭해서 포커스 이동
         await editorBody.click();
-        await page.waitForTimeout(500);
-
-        log(`  ✅ 이미지 업로드 완료`);
+        await page.waitForTimeout(1000);
+        log(`  ✅ 나머지 이미지 업로드 완료`);
       } catch (e) {
-        log(`  이미지 업로드 실패: ${e.message}`);
+        log(`    나머지 이미지 업로드 실패: ${e.message}`);
       }
     }
 
-    // 2. 에디터 클릭하고 엔터
-    await editorBody.click();
-    await page.waitForTimeout(300);
-    await page.keyboard.press('End'); // 끝으로 이동
-    await page.keyboard.press('Enter');
-    await page.keyboard.press('Enter');
+    // 6. 마무리 멘트 + 링크 입력
+    log(`  [5/6] 마무리 멘트 + 링크 입력...`);
 
-    // 3. 대가성 문구 입력
-    await page.keyboard.type(DISCLOSURE, { delay: 10 });
-    await page.keyboard.press('Enter');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(300);
-
-    // 4. 본문 직접 입력 (볼드 처리 포함)
-    log(`  본문 입력 중 (볼드 처리 포함)...`);
-    const contentLines = geminiResult.content.split('\n');
-
-    for (const line of contentLines) {
-      if (line.trim()) {
-        await typeWithBold(page, line);
-      }
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(50);
+    // 아래 방향키 200번 눌러서 확실히 문서 맨 끝으로 이동
+    for (let i = 0; i < 200; i++) {
+      await page.keyboard.press('ArrowDown');
     }
-
-    await page.keyboard.press('Enter');
-    log(`  ✅ 본문 입력 완료`);
-
-    // 5. 마무리 멘트
-    await page.keyboard.type('지금 바로 확인해보세요!', { delay: 15 });
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(300);
-
-    // 4. 상품 링크 직접 타이핑
-    await page.keyboard.press('End');
+    await page.waitForTimeout(500);
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    // 링크 입력
-    const affiliateLink = product.affiliateLink || '';
+    await page.keyboard.type('지금 바로 확인해보세요!', { delay: 20 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+
+    const affiliateLink = product.affiliate_link || product.affiliateLink || '';
     if (affiliateLink) {
-      await page.keyboard.type(affiliateLink, { delay: 10 });
-      await page.waitForTimeout(300);
-
-      // 엔터 후 링크 미리보기 생성 대기
+      await page.keyboard.type(affiliateLink, { delay: 15 });
+      await page.waitForTimeout(500);
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(5000); // 미리보기 로딩 대기
-      log(`  상품 링크 입력 + 미리보기 생성 완료`);
+      await page.waitForTimeout(5000);
+      log(`  ✅ 상품 링크 입력 + 미리보기 생성 완료`);
     }
 
-    // 4. 해시태그 입력 (force: true로 덮여있는 요소 무시)
+    // 해시태그 입력
     try {
       const hashtags = generateHashtags(product.name);
-      // # 제거하고 태그만 추출
       const tagList = hashtags.split(' ').map(tag => tag.replace('#', ''));
 
-      // .tag_input 클래스에 직접 포커스 (force: true 필수)
       const tagInput = page.locator('input.tag_input').first();
       if (await tagInput.count() > 0) {
         await tagInput.click({ force: true });
         await page.waitForTimeout(500);
 
-        // 태그 하나씩 입력하고 엔터
         for (const tag of tagList) {
           await page.keyboard.type(tag, { delay: 30 });
           await page.keyboard.press('Enter');
           await page.waitForTimeout(400);
         }
         log(`  ✅ 해시태그 입력: ${hashtags}`);
-      } else {
-        log(`  ⚠️ 태그 입력 영역 못찾음`);
       }
     } catch (e) {
       log(`  해시태그 입력 실패: ${e.message}`);
     }
 
-    // 5. 등록 버튼 클릭
+    // 등록 버튼 클릭
     await page.waitForTimeout(1000);
-
-    // 혹시 남아있는 팝업 닫기
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
-
-    // 제목 영역 클릭해서 포커스 확실히 이동
     await titleInput.click();
     await page.waitForTimeout(500);
 
     let registered = false;
 
-    // 방법 1: skinGreen 등록 버튼 (정확한 셀렉터)
     const skinGreenBtn = page.locator('button.BaseButton--skinGreen');
     if (await skinGreenBtn.count() > 0) {
       log(`  등록 버튼 발견 (skinGreen), 클릭 시도...`);
       await skinGreenBtn.first().click();
       await page.waitForTimeout(5000);
 
-      // 등록 후 URL 변화 확인
-      const currentUrl = page.url();
-      if (!currentUrl.includes('/write')) {
-        log(`  ✅ 글 등록 완료! URL: ${currentUrl}`);
+      const postUrl = page.url();
+      if (!postUrl.includes('/write')) {
+        log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
         registered = true;
-      } else {
-        log(`  ⚠️ 등록 버튼 클릭했으나 페이지 이동 없음`);
       }
     }
 
-    // 방법 2: 모든 BaseButton에서 "등록" 텍스트 찾기
     if (!registered) {
       const baseBtns = await page.locator('.BaseButton').all();
       for (const btn of baseBtns) {
@@ -652,9 +702,9 @@ async function writePost(page, product, images, doLoginFn) {
             await btn.click();
             await page.waitForTimeout(5000);
 
-            const currentUrl = page.url();
-            if (!currentUrl.includes('/write')) {
-              log(`  ✅ 글 등록 완료! URL: ${currentUrl}`);
+            const postUrl = page.url();
+            if (!postUrl.includes('/write')) {
+              log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
               registered = true;
             }
             break;
@@ -677,13 +727,32 @@ async function writePost(page, product, images, doLoginFn) {
 
 // 메인 실행
 async function main() {
-  console.log('╔════════════════════════════════════════╗');
-  console.log('║   오늘의 득템 카페 자동 글쓰기         ║');
-  console.log('║   24시간 자동 실행                     ║');
-  console.log('║   Ctrl+C로 종료                        ║');
-  console.log('╚════════════════════════════════════════╝\n');
+  console.log('╔════════════════════════════════════════════════╗');
+  console.log('║   카페 자동 글쓰기 - Supabase 버전             ║');
+  console.log('║   분산 환경 지원 + 24시간 자동 실행            ║');
+  console.log('║   Ctrl+C로 종료                                ║');
+  console.log('╚════════════════════════════════════════════════╝\n');
 
   ensureDir('output');
+
+  log('Supabase 연결 테스트...');
+  const connTest = await testConnection();
+
+  if (!connTest.success) {
+    log(`❌ DB 연결 실패: ${connTest.error}`);
+    log('📌 .env 파일에 SUPABASE_URL과 SUPABASE_SERVICE_KEY를 확인하세요.');
+    process.exit(1);
+  }
+
+  log(`✅ DB 연결 성공 (등록된 상품: ${connTest.productCount}개)\n`);
+
+  let worker;
+  try {
+    worker = await registerWorker(WORKER_NAME, 'cafe');
+    log(`Worker 등록: ${worker.name} (${worker.id})\n`);
+  } catch (e) {
+    log(`⚠️ Worker 등록 실패: ${e.message}`);
+  }
 
   const browser = await chromium.launch({
     headless: false,
@@ -696,7 +765,6 @@ async function main() {
 
   const page = await context.newPage();
 
-  // 로그인 함수 (필요할 때만 호출)
   async function doLogin() {
     log('네이버 로그인 중...');
     await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
@@ -710,7 +778,6 @@ async function main() {
     log('로그인 완료\n');
   }
 
-  // 로그인 상태 체크 함수
   async function checkAndLogin() {
     log('로그인 상태 확인 중...');
     await page.goto(CAFE_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
@@ -718,14 +785,12 @@ async function main() {
 
     const currentUrl = page.url();
 
-    // 로그인 페이지로 리다이렉트되었는지 확인
     if (currentUrl.includes('nidlogin') || currentUrl.includes('login')) {
       log('로그인 필요 - 로그인 진행...');
       await doLogin();
-      return false; // 로그인 후 글쓰기 페이지 재이동 필요
+      return false;
     }
 
-    // 글쓰기 페이지가 아닌 다른 곳으로 갔는지 확인
     if (!currentUrl.includes('/write') && !currentUrl.includes('articles/write')) {
       log('글쓰기 페이지 접근 불가 - 로그인 시도...');
       await doLogin();
@@ -733,58 +798,59 @@ async function main() {
     }
 
     log('✅ 이미 로그인 상태 - 바로 글쓰기 가능\n');
-    return true; // 이미 글쓰기 페이지에 있음
+    return true;
   }
 
   try {
-    // 첫 로그인 상태 체크
     await checkAndLogin();
 
-    // 24시간 루프
     while (true) {
-      const products = loadProducts();
-      const posted = loadPostedProducts();
+      if (worker) {
+        try {
+          await updateWorkerHeartbeat(worker.id);
+        } catch (e) {}
+      }
 
-      log(`\n총 상품: ${products.length}개, 게시됨: ${posted.size}개`);
+      log('\n📊 Supabase에서 상품 조회 중...');
+      const products = await getProductsForPosting('cafe', 1);
 
-      // affiliateLink가 있는 상품만 필터링
-      const available = products.filter(p => p.affiliateLink);
-
-      if (available.length === 0) {
+      if (!products || products.length === 0) {
         log('게시 가능한 상품이 없습니다. 10분 후 다시 확인...');
         await page.waitForTimeout(10 * 60 * 1000);
         continue;
       }
 
-      // 카운트 낮은 것 우선 정렬 (안 쓴 것 우선)
-      const sorted = sortProductsByCount(available, posted);
-      const minCount = posted.get(sorted[0].productId) || 0;
-      log(`상품 정렬 완료 (최소 게시횟수: ${minCount})`);
+      const product = products[0];
+      log(`\n선택된 상품: ${product.name.substring(0, 30)}...`);
+      log(`  카페 게시 횟수: ${product.cafe_count}회`);
+      log(`  총 게시 횟수: ${product.total_count}회`);
 
-      for (const product of sorted) {
-        const currentCount = posted.get(product.productId) || 0;
-        log(`\n[게시횟수: ${currentCount}] ${product.name.substring(0, 20)}... 처리 중...`);
+      const productUrl = product.product_url || '';
+      const affiliateLink = product.affiliate_link || '';
 
-        const images = await getProductImages(page, product.productUrl, product.affiliateLink);
-        const success = await writePost(page, product, images, doLogin);
+      const images = await getProductImages(page, productUrl, affiliateLink);
+      const success = await writePost(page, product, images, doLogin);
 
-        if (success) {
-          // 카운트 증가
-          posted.set(product.productId, currentCount + 1);
-          savePostedProducts(posted);
-          log(`  게시 카운트 업데이트: ${currentCount} -> ${currentCount + 1}`);
-        }
-
-        // 이미지 파일 삭제
-        for (const img of images) {
-          try { fs.unlinkSync(img); } catch (e) {}
-        }
-
-        // 글 작성 간격 (5~10분 랜덤)
-        const waitTime = 5 * 60 * 1000 + Math.random() * 5 * 60 * 1000;
-        log(`다음 글까지 ${Math.round(waitTime / 60000)}분 대기...`);
-        await page.waitForTimeout(waitTime);
+      try {
+        await recordPost(
+          product.product_id,
+          worker?.id || null,
+          'cafe',
+          success,
+          success ? null : '게시 실패'
+        );
+        log(`  📝 게시 기록 저장 완료`);
+      } catch (e) {
+        log(`  ⚠️ 게시 기록 저장 실패: ${e.message}`);
       }
+
+      for (const img of images) {
+        try { fs.unlinkSync(img); } catch (e) {}
+      }
+
+      const waitTime = 5 * 60 * 1000 + Math.random() * 5 * 60 * 1000;
+      log(`다음 글까지 ${Math.round(waitTime / 60000)}분 대기...`);
+      await page.waitForTimeout(waitTime);
     }
 
   } catch (error) {

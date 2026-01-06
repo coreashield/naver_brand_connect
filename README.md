@@ -4,6 +4,7 @@
 
 ## Features
 
+- **자동 링크 발급**: 모든 카테고리의 미발급 상품 자동 어필리에이트 링크 발급
 - **Gemini AI 콘텐츠 생성**: 상품 정보 기반 자연스러운 글 자동 작성
 - **카페 자동 글쓰기**: 24시간 자동 실행, 볼드 처리, 해시태그 자동 생성
 - **블로그 자동 글쓰기**: 2500-3500자 장문 콘텐츠, 이미지 자동 배치
@@ -42,7 +43,33 @@ GEMINI_API_KEY = your_gemini_api_key
 
 ## Usage
 
-### 1. 상품 링크 크롤링
+### Full Sync (권장 - 한번에 모든 작업)
+
+```bash
+node full_sync.js
+```
+
+또는 배치 파일 실행:
+```
+full_sync.bat
+```
+
+**한번에 실행되는 작업:**
+1. 모든 카테고리(14개)에서 신규 상품 링크 자동 발급
+2. 발급 링크 관리 페이지에서 데이터 수집
+3. product_links.json 자동 업데이트
+
+---
+
+### 개별 실행 (필요시)
+
+#### 0. 자동 링크 발급만
+
+```bash
+node auto_link_issuer.js
+```
+
+#### 1. 상품 링크 크롤링만
 
 ```bash
 node link_crawler.js
@@ -101,12 +128,16 @@ cafe_standalone/
 ## File Structure
 
 ```
-├── cafe_writer.js          # 카페 자동 글쓰기 (메인)
-├── blog_writer.js          # 블로그 자동 글쓰기
+├── full_sync.js            # 통합 실행 (발급+크롤링)
+├── auto_link_issuer.js     # 자동 링크 발급
 ├── link_crawler.js         # 상품 링크 크롤러
+├── cafe_writer.js          # 카페 자동 글쓰기
+├── blog_writer.js          # 블로그 자동 글쓰기
+├── full_sync.bat           # 통합 실행 배치 파일
 ├── .env                    # 환경 설정 (git 제외)
 ├── output/
 │   ├── product_links.json  # 상품 목록
+│   ├── sync_log.json       # 동기화 기록
 │   ├── posted_products.json # 카페 게시 기록
 │   └── blog_posted.json    # 블로그 게시 기록
 └── cafe_standalone/        # Portable 패키지 (git 제외)
@@ -114,10 +145,22 @@ cafe_standalone/
 
 ## Notes
 
+- 링크 발급: 14개 카테고리 전체 순회, 미발급 상품만 자동 발급
 - 게시 간격: 5-10분 랜덤 (스팸 방지)
 - 상품 선택: 게시 횟수 낮은 것 우선
 - 이미지: 최대 3장, 5KB 미만 에러 이미지 자동 제외
 - 볼드 처리: Gemini가 **강조** 표시한 부분 자동 Ctrl+B 적용
+
+## Workflow
+
+**간편 실행 (권장):**
+```
+full_sync.bat → cafe_writer.js 또는 blog_writer.js
+```
+
+**상세 플로우:**
+1. `full_sync.js` - 링크 발급 + 크롤링 + product_links.json 업데이트
+2. `cafe_writer.js` / `blog_writer.js` - 자동 글쓰기
 
 ## License
 

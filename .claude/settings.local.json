@@ -26,7 +26,27 @@
       "Bash(xcopy:*)",
       "Bash(export PLAYWRIGHT_BROWSERS_PATH=\"./browsers\")",
       "Bash(npx playwright install chromium)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Add Gemini AI content generation and portable deployment\n\n- Blog writer: Gemini AI for long-form content \\(2500-3500 chars\\)\n- Cafe writer: Gemini AI with bold formatting \\(Ctrl+B\\)\n- Image validation: Skip error/placeholder images \\(<5KB\\)\n- Smart image sourcing: Follow affiliate links to SmartStore\n- Portable deployment scripts for standalone distribution\n- Auto product selection from product_links.json\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(zip:*)",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_click",
+      "Bash(supabase --version:*)",
+      "Bash(where:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(del \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\src\\\\writers\\\\cafe_writer.js\")",
+      "Bash(del \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\src\\\\writers\\\\cafe_portable.js\")",
+      "Bash(del \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\src\\\\writers\\\\blog_writer.js\")",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" log --oneline -5)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" diff --stat)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" config http.postBuffer 524288000)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" push origin main)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" status)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" reset --soft HEAD~1)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" reset HEAD)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" add -A)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" status --short)"
     ]
   }
 }

@@ -7,10 +7,12 @@ node_modules/
 # Output files
 output/
 
-# Portable packages (large files - rebuild on target)
+# Portable packages (large files - download from Releases)
 portable_package/
 cafe_standalone/
 node_portable/
+packages/
+scripts/node-portable/
 *.zip
 
 # OS files
