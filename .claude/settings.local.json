@@ -46,7 +46,17 @@
       "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" reset --soft HEAD~1)",
       "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" reset HEAD)",
       "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" add -A)",
-      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" status --short)"
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" status --short)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" commit -m \"$\\(cat <<''EOF''\nrefactor: Reorganize project structure with Supabase integration\n\n- Reorganize source files into src/ directory structure\n  - src/writers: Blog and cafe auto-posting modules\n  - src/crawlers: Product link crawler\n  - src/analyze: Page analysis tools\n  - src/utils: Shared utilities \\(templates, image handler\\)\n  - src/supabase: Database integration layer\n- Add setup.bat for one-click portable package installation\n- Add .env.sample template for environment configuration\n- Add Supabase setup documentation\n- Move batch scripts to scripts/ directory\n- Update .gitignore to exclude large binary packages\n\nNote: Run setup.bat to download portable runtime \\(Node.js + Chromium\\)\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(powershell -NoProfile -Command \"\\(Get-Item ''C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\portable_package.zip''\\).Length / 1MB\")",
+      "Bash(gh release create:*)",
+      "Bash(gh auth refresh:*)",
+      "Bash(gh auth:*)",
+      "Bash(cmd //c \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\setup.bat\")",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -Path ''C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\test_download.zip'' -DestinationPath ''C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\\\\packages'' -Force\")",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" add setup.bat)",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" commit -m \"fix: Update setup.bat with correct paths and English messages\n\n- Fix installation check path \\(packages/node/node.exe\\)\n- Use English messages to avoid encoding issues\n- Update download size info \\(324MB\\)\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\")",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\shopping_connect\" commit -m \"feat: Add headless mode selection for browser\n\n- Add HEADLESS env var support in blog/cafe writers\n- Update START_BLOG.bat and START_CAFE.bat with mode selection prompt\n- Users can choose: 1=visible browser, 2=background mode\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\")"
     ]
   }
 }

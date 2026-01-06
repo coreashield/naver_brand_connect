@@ -813,8 +813,9 @@ async function main() {
     log(`⚠️ Worker 등록 실패: ${e.message}`);
   }
 
+  const isHeadless = process.env.HEADLESS === 'true';
   const browser = await chromium.launch({
-    headless: false,
+    headless: isHeadless,
     slowMo: 30
   });
 
