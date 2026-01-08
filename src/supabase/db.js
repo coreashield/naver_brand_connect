@@ -37,6 +37,7 @@ export async function upsertProduct(product) {
       status: product.status || 'ON',
       product_url: product.productUrl || product.product_url,
       affiliate_link: product.affiliateLink || product.affiliate_link,
+      naver_shopping_url: product.naverShoppingUrl || product.naver_shopping_url || null,
       updated_at: new Date().toISOString()
     }, {
       onConflict: 'product_id'
@@ -61,6 +62,7 @@ export async function upsertProducts(products) {
     status: p.status || 'ON',
     product_url: p.productUrl || p.product_url,
     affiliate_link: p.affiliateLink || p.affiliate_link,
+    naver_shopping_url: p.naverShoppingUrl || p.naver_shopping_url || null,
     updated_at: new Date().toISOString()
   }));
 
@@ -339,6 +341,62 @@ export async function testConnection() {
   }
 }
 
+// ==================== Naver Shopping URL ====================
+
+/**
+ * naver_shopping_url 업데이트
+ */
+export async function updateNaverShoppingUrl(productId, naverShoppingUrl) {
+  const { error } = await supabase
+    .from('products')
+    .update({
+      naver_shopping_url: naverShoppingUrl,
+      updated_at: new Date().toISOString()
+    })
+    .eq('product_id', productId);
+
+  if (error) throw error;
+}
+
+/**
+ * naver_shopping_url이 없는 상품 조회
+ */
+export async function getProductsWithoutNaverUrl(limit = 100) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('status', 'ON')
+    .is('naver_shopping_url', null)
+    .not('product_url', 'is', null)
+    .order('updated_at', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * naver_shopping_url 통계
+ */
+export async function getNaverUrlStats() {
+  const { count: total } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON');
+
+  const { count: withUrl } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON')
+    .not('naver_shopping_url', 'is', null);
+
+  return {
+    total: total || 0,
+    withNaverUrl: withUrl || 0,
+    withoutNaverUrl: (total || 0) - (withUrl || 0)
+  };
+}
+
 export default {
   supabase,
   upsertProduct,
@@ -355,5 +413,8 @@ export default {
   claimTask,
   completeTask,
   retryTask,
-  testConnection
+  testConnection,
+  updateNaverShoppingUrl,
+  getProductsWithoutNaverUrl,
+  getNaverUrlStats
 };

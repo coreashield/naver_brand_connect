@@ -177,19 +177,27 @@ async function getSmartStoreImages(page, storeUrl) {
 }
 
 // Brand Connect 또는 스마트스토어에서 상품 이미지 가져오기
-async function getProductImages(page, productUrl, affiliateLink = '') {
+async function getProductImages(page, productUrl, affiliateLink = '', naverShoppingUrl = '') {
   const images = [];
   let imageUrls = [];
 
   try {
-    if (affiliateLink && affiliateLink.includes('naver.me')) {
-      log(`  affiliateLink에서 실제 스토어 URL 추출 중...`);
+    // 1순위: naver_shopping_url 사용 (방문 카운트 증가 없음)
+    if (naverShoppingUrl && naverShoppingUrl.length > 0) {
+      log(`  naver_shopping_url 사용 (방문카운트 X): ${naverShoppingUrl.substring(0, 50)}...`);
+      imageUrls = await getSmartStoreImages(page, naverShoppingUrl);
+      log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
+    }
+
+    // 2순위: affiliateLink 사용 (방문 카운트 +1)
+    if (imageUrls.length === 0 && affiliateLink && affiliateLink.includes('naver.me')) {
+      log(`  affiliateLink 폴백 사용 (방문카운트 +1)...`);
       const realUrl = await getRedirectUrl(page, affiliateLink);
 
-      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver'))) {
-        log(`  스마트스토어 URL: ${realUrl.substring(0, 50)}...`);
+      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
+        log(`  스토어 URL: ${realUrl.substring(0, 50)}...`);
         imageUrls = await getSmartStoreImages(page, realUrl);
-        log(`  스마트스토어에서 이미지 ${imageUrls.length}개 발견`);
+        log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
       }
     }
 
@@ -895,8 +903,9 @@ async function main() {
 
       const productUrl = product.product_url || '';
       const affiliateLink = product.affiliate_link || '';
+      const naverShoppingUrl = product.naver_shopping_url || '';
 
-      const images = await getProductImages(page, productUrl, affiliateLink);
+      const images = await getProductImages(page, productUrl, affiliateLink, naverShoppingUrl);
 
       // 이미지가 하나도 없으면 (삭제된 페이지/IP밴) 다음 상품으로
       if (!images || images.length === 0) {
