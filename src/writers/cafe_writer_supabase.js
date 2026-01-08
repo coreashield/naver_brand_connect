@@ -783,12 +783,29 @@ async function main() {
 
   const isHeadless = process.env.HEADLESS === 'true';
   const browser = await chromium.launch({
+    channel: 'chrome',  // 실제 Chrome 사용 (anti-detection)
     headless: isHeadless,
-    slowMo: 30
+    slowMo: 30,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--no-sandbox'
+    ]
   });
 
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: { width: 1920, height: 1080 },
+    locale: 'ko-KR',
+    timezoneId: 'Asia/Seoul'
+  });
+
+  // 자동화 감지 우회 스크립트 (context 수준 - 모든 새 페이지에 적용)
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+    window.chrome = { runtime: {} };
   });
 
   const page = await context.newPage();
