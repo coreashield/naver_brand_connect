@@ -769,8 +769,24 @@ async function writePost(page, product, images, doLoginFn) {
     // 최종 발행 버튼 클릭 (해시태그 입력 후)
     await page.waitForTimeout(1000);
     try {
-      // 발행 완료 버튼 찾기 (여러 가지 선택자 시도)
-      const finalPublishBtn = await mainFrame.$('button.confirm_btn__Ky5Rv, button.publish_layer_btn__fLQ75, button[class*="confirm"], button:has-text("발행")');
+      // 발행 완료 버튼 찾기 (data-testid 우선, 클래스명은 동적으로 변경됨)
+      const selectors = [
+        'button[data-testid="seOnePublishBtn"]',  // 가장 안정적
+        'button.confirm_btn__WEaBq',
+        'button.confirm_btn__Ky5Rv',
+        'button[class*="confirm_btn"]',
+        'button:has-text("발행")'
+      ];
+
+      let finalPublishBtn = null;
+      for (const selector of selectors) {
+        finalPublishBtn = await mainFrame.$(selector);
+        if (finalPublishBtn) {
+          log(`  발행 버튼 찾음: ${selector}`);
+          break;
+        }
+      }
+
       if (finalPublishBtn) {
         // 버튼이 보이도록 스크롤 후 강제 클릭
         await finalPublishBtn.scrollIntoViewIfNeeded();
