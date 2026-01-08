@@ -17,6 +17,7 @@ import {
   updateWorkerHeartbeat,
   testConnection
 } from '../supabase/db.js';
+import { generateContent, getRandomStyle, WRITING_STYLES } from '../utils/content_generator.js';
 
 dotenv.config();
 
@@ -249,11 +250,14 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
       await productPage.close();
     }
 
-    // 5~8장 다운로드
-    const targetCount = Math.min(MAX_IMAGES, Math.max(MIN_IMAGES, imageUrls.length));
+    // 5~8장 다운로드 (첫 번째 이미지는 로고/배너일 가능성 높아서 스킵)
+    const startIndex = imageUrls.length > MIN_IMAGES ? 1 : 0;  // 이미지 충분하면 첫 번째 스킵
+    const targetCount = Math.min(MAX_IMAGES, Math.max(MIN_IMAGES, imageUrls.length - startIndex));
     let downloadedCount = 0;
 
-    for (let i = 0; i < imageUrls.length && downloadedCount < targetCount; i++) {
+    log(`  첫 번째 이미지 ${startIndex === 1 ? '스킵 (로고/배너 제외)' : '포함'}`);
+
+    for (let i = startIndex; i < imageUrls.length && downloadedCount < targetCount; i++) {
       try {
         const filename = `product_${Date.now()}_${i}.jpg`;
         const filepath = await downloadImage(imageUrls[i], filename);
@@ -341,23 +345,39 @@ async function typeWithBold(page, text) {
   }
 }
 
-// 해시태그 생성
-function generateHashtags(productName) {
-  const keywords = productName
+// 해시태그 생성 (블로그용 - 15~30개, 상품 관련만)
+function generateHashtags(productName, category = '') {
+  // 상품명에서 키워드 추출
+  const nameKeywords = productName
     .replace(/[\[\]\(\)\/\+\-\d]+/g, ' ')
     .split(/\s+/)
     .filter(w => w.length >= 2 && w.length <= 10)
-    .filter(w => !['세트', '개입', '무료', '배송', '할인', '특가', '증정', '박스'].includes(w))
-    .slice(0, 5);
+    .filter(w => !['세트', '개입', '무료', '배송', '할인', '특가', '증정', '박스', '단품', '국내', '해외'].includes(w));
 
-  const commonTags = ['추천', '득템', '쇼핑', '핫딜', '가성비', '데일리', '솔직후기'];
-  const randomCommon = commonTags.sort(() => Math.random() - 0.5).slice(0, 3);
+  // 카테고리에서 키워드 추출
+  const categoryKeywords = category
+    .replace(/>/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && w.length <= 10);
 
-  const allTags = [...new Set([...keywords, ...randomCommon])].slice(0, 10);
-  return allTags.map(tag => `#${tag}`).join(' ');
+  // 키워드 조합으로 추가 태그 생성
+  const combinedTags = [];
+  if (nameKeywords.length >= 2) {
+    // 2개 키워드 조합
+    for (let i = 0; i < Math.min(nameKeywords.length - 1, 5); i++) {
+      combinedTags.push(nameKeywords[i] + nameKeywords[i + 1]);
+    }
+  }
+
+  // 전체 합치기 (중복 제거)
+  const allTags = [...new Set([...nameKeywords, ...categoryKeywords, ...combinedTags])];
+
+  // 15~30개 사이로 조절
+  const finalTags = allTags.slice(0, 30);
+  return finalTags.length >= 15 ? finalTags : allTags.slice(0, Math.max(allTags.length, 15));
 }
 
-// Gemini로 제목 + 본문 생성 (블로그용)
+// Gemini로 제목 + 본문 생성 (새로운 다양한 스타일 시스템)
 async function generateContentWithGemini(product) {
   log(`  Gemini API로 콘텐츠 생성 중...`);
 
@@ -365,80 +385,39 @@ async function generateContentWithGemini(product) {
     throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-  const prompt = `당신은 쇼핑 정보를 공유하는 블로그 게시글 작성자입니다.
-
-상품 정보:
-- 상품명: ${product.name}
-- 가격: ${product.price || '가격 정보 없음'}
-
-[제목 작성 규칙]
-- 상품명 "${product.name}"을 절대 줄이거나 생략하지 말고 전체를 그대로 포함
-- 상품명 뒤에 클릭을 유도하는 짧은 문구 추가 (예: 지금 핫딜, 놓치면 후회, 가성비 최고)
-- 총 길이 80자 이내
-- 제목에 이모지, 이모티콘, 특수문자 절대 사용 금지 (느낌표, 물음표만 허용)
-
-[본문 작성 규칙]
-- 2500~3500자 분량 (긴 글)
-- 친근한 말투 (~요, ~해요, ㅎㅎ 사용 가능)
-- 이모티콘은 전체 본문에서 5~8개 정도 사용 (적당히)
-- 강조하고 싶은 부분은 **볼드**로 표시 (예: **가성비 최고**, **품절 임박**)
-- 볼드는 핵심 키워드에만 사용 (전체 5~8개 정도)
-- ##, -, * 리스트 등 다른 마크다운은 사용 금지
-- 중요한 핵심 메시지 3~5개는 반드시 [QUOTE]내용[/QUOTE] 형식으로 감싸주세요 (인용구로 강조됨)
-- [QUOTE] 태그는 한 줄에 하나씩만 사용하고, 태그 안에 줄바꿈 넣지 마세요
-
-[모바일 최적화 - 중요!]
-- 한 문장은 최대 40자 이내로 짧게 작성
-- 2~3문장마다 빈 줄(줄바꿈) 넣어서 문단 구분
-- 모바일에서 읽기 편하게 짧은 문장 위주로 작성
-- 긴 설명은 여러 줄로 나눠서 작성
-
-[구성]
-1. 도입 (왜 이 상품을 발견했는지)
-2. 상품 특징 및 장점 (5~6가지)
-3. 어떤 분들에게 추천하는지
-4. 가격 대비 가성비 분석
-5. 활용 팁 및 코디 제안
-6. 구매를 강력하게 유도하는 마무리
-
-[절대 포함하면 안 되는 내용]
-- "직접 구매했다", "직접 써봤다", "사용해봤다" 등 본인이 구매/사용했다는 표현
-- "후기", "리뷰", "착용해봤다", "입어봤다" 등의 표현
-- 개인적인 경험담
-
-[반드시 포함해야 하는 내용]
-- 이 상품이 왜 좋은지 장점 설명 (5~6가지)
-- 어떤 분들에게 추천하는지
-- 가격 대비 가성비가 좋다는 점
-- 지금 구매해야 하는 이유 (할인, 품절 임박 등 긴급성)
-- 구매를 강력하게 유도하는 마무리 멘트
-
-[톤앤매너]
-- 정보 공유하는 느낌으로 (내가 샀다 X, 이런 상품 발견했어요 O)
-- "요즘 핫한", "입소문 난", "SNS에서 난리난" 같은 표현 활용
-- 구매 욕구를 자극하는 문장
-
-출력 형식 (정확히 지켜주세요):
-[TITLE]
-상품명 전체 + 클릭유도문구
-
-[CONTENT]
-본문 내용 (강조할 부분은 **볼드**로)`;
+  // 상품 정보를 확장된 형태로 변환
+  const productInfo = {
+    name: product.name,
+    price: product.price ? parseInt(product.price.toString().replace(/[^0-9]/g, '')) : null,
+    originalPrice: product.original_price ? parseInt(product.original_price.toString().replace(/[^0-9]/g, '')) : null,
+    category: product.category || null,
+    brand: product.brand || null,
+    manufacturer: product.manufacturer || null,
+    rating: product.rating || null,
+    reviewCount: product.review_count || null,
+    keywords: product.keywords || [],
+    targetAudience: product.target_audience || {
+      ageGroup: '20-40대',
+      gender: '공용',
+      persona: '일반 소비자'
+    }
+  };
 
   try {
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    // 랜덤 스타일로 콘텐츠 생성
+    const result = await generateContent(productInfo, {
+      platform: 'blog',
+      style: null,  // 랜덤 선택
+      apiKey: GEMINI_API_KEY
+    });
 
-    const titleMatch = responseText.match(/\[TITLE\]\s*([\s\S]*?)(?=\[CONTENT\])/i);
-    const contentMatch = responseText.match(/\[CONTENT\]\s*([\s\S]*)/i);
+    let title = result.title || `${product.name} 추천합니다`;
+    let content = result.body || '';
 
-    let title = titleMatch ? titleMatch[1].trim() : `${product.name} 추천합니다`;
-    let content = contentMatch ? contentMatch[1].trim() : '';
-
+    // 제목에서 특수문자 제거
     title = title.replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣!?,.\[\]\(\)]/g, '').trim();
 
+    // 본문 정리
     content = content
       .replace(/(?<!\*)\*(?!\*)/g, '')
       .replace(/^#+\s*/gm, '')
@@ -447,15 +426,19 @@ async function generateContentWithGemini(product) {
       .replace(/`/g, '')
       .trim();
 
+    log(`  ✨ 스타일: ${result.styleName}`);
     log(`  Gemini 생성 완료 (제목: ${title.substring(0, 30)}...)`);
     log(`  생성된 본문 길이: ${content.length}자`);
 
-    return { title, content };
+    return { title, content, style: result.styleName };
   } catch (error) {
     log(`  Gemini API 오류: ${error.message}`);
+
+    // 폴백: 기본 콘텐츠 생성
     return {
       title: `${product.name} 강력 추천`,
-      content: `요즘 SNS에서 핫한 상품 발견했어요~\n\n${product.name}\n\n가성비 좋고 품질도 좋다고 소문난 제품이에요.\n지금 할인 중이라 이 가격에 구매하기 힘들 수도 있어요.\n\n관심 있으신 분들은 빨리 확인해보세요~`
+      content: `요즘 SNS에서 핫한 상품 발견했어요~\n\n${product.name}\n\n가성비 좋고 품질도 좋다고 소문난 제품이에요.\n지금 할인 중이라 이 가격에 구매하기 힘들 수도 있어요.\n\n관심 있으신 분들은 빨리 확인해보세요~`,
+      style: 'fallback'
     };
   }
 }
@@ -753,28 +736,54 @@ async function writePost(page, product, images, doLoginFn) {
 
     // 해시태그 입력
     try {
-      const hashtags = generateHashtags(product.name);
-      const tagList = hashtags.split(' ').map(tag => tag.replace('#', ''));
+      const tagList = generateHashtags(product.name, product.category || '');
+      log(`  해시태그 ${tagList.length}개 입력 중...`);
 
       const hashtagInput = await mainFrame.$('input[placeholder*="태그"], input[placeholder*="해시태그"]');
       if (hashtagInput) {
         for (const tag of tagList) {
           await hashtagInput.click();
-          await page.waitForTimeout(200);
-          await page.keyboard.type(tag, { delay: 30 });
+          await page.waitForTimeout(150);
+          await page.keyboard.type(tag, { delay: 20 });
           await page.keyboard.press('Enter');
-          await page.waitForTimeout(300);
+          await page.waitForTimeout(200);
         }
-        log(`  ✅ 해시태그 입력: ${hashtags}`);
+        log(`  ✅ 해시태그 입력 완료: ${tagList.length}개`);
       }
     } catch (e) {
       log(`  해시태그 입력 실패: ${e.message}`);
     }
 
-    log(`\n  ✅ 글 작성 완료! 발행 확인 후 진행하세요.`);
-    log(`  60초 후 다음 단계로 진행...`);
+    // 최종 발행 버튼 클릭 (해시태그 입력 후)
+    await page.waitForTimeout(1000);
+    try {
+      // 발행 완료 버튼 찾기 (여러 가지 선택자 시도)
+      const finalPublishBtn = await mainFrame.$('button.confirm_btn__Ky5Rv, button.publish_layer_btn__fLQ75, button[class*="confirm"], button:has-text("발행")');
+      if (finalPublishBtn) {
+        await finalPublishBtn.click();
+        log('  ✅ 최종 발행 버튼 클릭');
+        await page.waitForTimeout(3000);
+      } else {
+        // 텍스트로 찾기
+        const buttons = await mainFrame.$$('button');
+        for (const btn of buttons) {
+          const text = await btn.textContent();
+          if (text && text.includes('발행')) {
+            await btn.click();
+            log('  ✅ 최종 발행 버튼 클릭 (텍스트 매칭)');
+            await page.waitForTimeout(3000);
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      log(`  최종 발행 버튼 클릭 실패: ${e.message}`);
+    }
 
-    await page.waitForTimeout(60000);
+    log(`\n  ✅ 글 발행 완료!`);
+    log(`  10초 후 다음 상품 진행...`);
+
+    await page.waitForTimeout(10000);
 
     return true;
 
@@ -883,6 +892,23 @@ async function main() {
       const affiliateLink = product.affiliate_link || '';
 
       const images = await getProductImages(page, productUrl, affiliateLink);
+
+      // 이미지가 하나도 없으면 (삭제된 페이지/IP밴) 다음 상품으로
+      if (!images || images.length === 0) {
+        log(`  [SKIP] No images - page deleted or blocked. Moving to next product...`);
+        try {
+          await recordPost(
+            product.product_id,
+            worker?.id || null,
+            'blog',
+            false,
+            'No images - page unavailable'
+          );
+        } catch (e) {}
+        await page.waitForTimeout(3000);
+        continue;
+      }
+
       const success = await writePost(page, product, images, doLogin);
 
       try {
@@ -891,11 +917,11 @@ async function main() {
           worker?.id || null,
           'blog',
           success,
-          success ? null : '게시 실패'
+          success ? null : 'Post failed'
         );
-        log(`  📝 게시 기록 저장 완료`);
+        log(`  Post record saved`);
       } catch (e) {
-        log(`  ⚠️ 게시 기록 저장 실패: ${e.message}`);
+        log(`  Warning: Failed to save record: ${e.message}`);
       }
 
       for (const img of images) {

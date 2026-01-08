@@ -10,6 +10,7 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateContent, getRandomStyle, WRITING_STYLES } from '../utils/content_generator.js';
 import {
   getProductsForPosting,
   recordPost,
@@ -240,8 +241,13 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
       await productPage.close();
     }
 
+    // 첫 번째 이미지는 로고/배너일 가능성 높아서 스킵
+    const startIndex = imageUrls.length > 3 ? 1 : 0;
     let downloadedCount = 0;
-    for (let i = 0; i < imageUrls.length && downloadedCount < 3; i++) {
+
+    log(`  첫 번째 이미지 ${startIndex === 1 ? '스킵 (로고/배너 제외)' : '포함'}`);
+
+    for (let i = startIndex; i < imageUrls.length && downloadedCount < 3; i++) {
       try {
         const filename = `product_${Date.now()}_${i}.jpg`;
         const filepath = await downloadImage(imageUrls[i], filename);
@@ -327,23 +333,21 @@ async function typeWithBold(page, text) {
   }
 }
 
-// 해시태그 생성
+// 해시태그 생성 (카페용 - 10개, 상품 관련만)
 function generateHashtags(productName) {
+  // 상품명에서 키워드 추출
   const keywords = productName
     .replace(/[\[\]\(\)\/\+\-\d]+/g, ' ')
     .split(/\s+/)
     .filter(w => w.length >= 2 && w.length <= 10)
-    .filter(w => !['세트', '개입', '무료', '배송', '할인', '특가', '증정', '박스'].includes(w))
-    .slice(0, 5);
+    .filter(w => !['세트', '개입', '무료', '배송', '할인', '특가', '증정', '박스', '단품', '국내', '해외'].includes(w));
 
-  const commonTags = ['추천', '득템', '쇼핑', '핫딜', '가성비'];
-  const randomCommon = commonTags.sort(() => Math.random() - 0.5).slice(0, 2);
-
-  const allTags = [...new Set([...keywords, ...randomCommon])].slice(0, 7);
+  // 중복 제거 후 10개로
+  const allTags = [...new Set(keywords)].slice(0, 10);
   return allTags.map(tag => `#${tag}`).join(' ');
 }
 
-// Gemini로 제목 + 본문 동시 생성
+// Gemini로 제목 + 본문 동시 생성 (새로운 다양한 스타일 시스템)
 async function generateContentWithGemini(product) {
   log(`  Gemini API로 콘텐츠 생성 중...`);
 
@@ -351,72 +355,39 @@ async function generateContentWithGemini(product) {
     throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-  const prompt = `당신은 쇼핑 정보를 공유하는 카페 게시글 작성자입니다.
-
-상품 정보:
-- 상품명: ${product.name}
-- 가격: ${product.price || '가격 정보 없음'}
-
-[제목 작성 규칙]
-- 상품명 "${product.name}"을 절대 줄이거나 생략하지 말고 전체를 그대로 포함
-- 상품명 뒤에 클릭을 유도하는 짧은 문구 추가 (예: 지금 핫딜, 놓치면 후회, 가성비 최고)
-- 총 길이 80자 이내
-- 제목에 이모지, 이모티콘, 특수문자 절대 사용 금지 (느낌표, 물음표만 허용)
-
-[본문 작성 규칙]
-- 500~800자 분량
-- 친근한 말투 (~요, ~해요, ㅎㅎ 사용 가능)
-- 이모티콘은 전체 본문에서 2~3개만 사용 (과하게 쓰지 말 것)
-- 강조하고 싶은 부분은 **볼드**로 표시 (예: **가성비 최고**, **품절 임박**)
-- 볼드는 핵심 키워드에만 사용 (전체 3~5개 정도)
-- ##, -, * 리스트 등 다른 마크다운은 사용 금지
-- 중요한 핵심 메시지 2~3개는 반드시 [QUOTE]내용[/QUOTE] 형식으로 감싸주세요 (인용구로 강조됨)
-- [QUOTE] 태그는 한 줄에 하나씩만 사용하고, 태그 안에 줄바꿈 넣지 마세요
-
-[모바일 최적화 - 중요!]
-- 한 문장은 최대 40자 이내로 짧게 작성
-- 2~3문장마다 빈 줄(줄바꿈) 넣어서 문단 구분
-- 모바일에서 읽기 편하게 짧은 문장 위주로 작성
-- 긴 설명은 여러 줄로 나눠서 작성
-
-[절대 포함하면 안 되는 내용]
-- "직접 구매했다", "직접 써봤다", "사용해봤다" 등 본인이 구매/사용했다는 표현
-- "후기", "리뷰", "착용해봤다", "입어봤다" 등의 표현
-- 개인적인 경험담
-
-[반드시 포함해야 하는 내용]
-- 이 상품이 왜 좋은지 장점 설명 (3~4가지)
-- 어떤 분들에게 추천하는지
-- 가격 대비 가성비가 좋다는 점
-- 지금 구매해야 하는 이유 (할인, 품절 임박 등 긴급성)
-- 구매를 강력하게 유도하는 마무리 멘트
-
-[톤앤매너]
-- 정보 공유하는 느낌으로 (내가 샀다 X, 이런 상품 발견했어요 O)
-- "요즘 핫한", "입소문 난", "SNS에서 난리난" 같은 표현 활용
-- 구매 욕구를 자극하는 문장
-
-출력 형식 (정확히 지켜주세요):
-[TITLE]
-상품명 전체 + 클릭유도문구
-
-[CONTENT]
-본문 내용 (강조할 부분은 **볼드**로)`;
+  // 상품 정보를 확장된 형태로 변환
+  const productInfo = {
+    name: product.name,
+    price: product.price ? parseInt(product.price.toString().replace(/[^0-9]/g, '')) : null,
+    originalPrice: product.original_price ? parseInt(product.original_price.toString().replace(/[^0-9]/g, '')) : null,
+    category: product.category || null,
+    brand: product.brand || null,
+    manufacturer: product.manufacturer || null,
+    rating: product.rating || null,
+    reviewCount: product.review_count || null,
+    keywords: product.keywords || [],
+    targetAudience: product.target_audience || {
+      ageGroup: '20-40대',
+      gender: '공용',
+      persona: '일반 소비자'
+    }
+  };
 
   try {
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    // 랜덤 스타일로 콘텐츠 생성 (카페용)
+    const result = await generateContent(productInfo, {
+      platform: 'cafe',  // 카페용 (더 짧은 글)
+      style: null,  // 랜덤 선택
+      apiKey: GEMINI_API_KEY
+    });
 
-    const titleMatch = responseText.match(/\[TITLE\]\s*([\s\S]*?)(?=\[CONTENT\])/i);
-    const contentMatch = responseText.match(/\[CONTENT\]\s*([\s\S]*)/i);
+    let title = result.title || `${product.name} 추천합니다`;
+    let content = result.body || '';
 
-    let title = titleMatch ? titleMatch[1].trim() : `${product.name} 추천합니다`;
-    let content = contentMatch ? contentMatch[1].trim() : '';
-
+    // 제목에서 특수문자 제거
     title = title.replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣!?,.\[\]\(\)]/g, '').trim();
 
+    // 본문 정리
     content = content
       .replace(/(?<!\*)\*(?!\*)/g, '')
       .replace(/^#+\s*/gm, '')
@@ -425,14 +396,19 @@ async function generateContentWithGemini(product) {
       .replace(/`/g, '')
       .trim();
 
+    log(`  ✨ 스타일: ${result.styleName}`);
     log(`  Gemini 생성 완료 (제목: ${title.substring(0, 30)}...)`);
+    log(`  생성된 본문 길이: ${content.length}자`);
 
-    return { title, content };
+    return { title, content, style: result.styleName };
   } catch (error) {
     log(`  Gemini API 오류: ${error.message}`);
+
+    // 폴백: 기본 콘텐츠 생성
     return {
       title: `${product.name} 강력 추천`,
-      content: `요즘 SNS에서 핫한 상품 발견했어요~\n\n${product.name}\n\n가성비 좋고 품질도 좋다고 소문난 제품이에요.\n지금 할인 중이라 이 가격에 구매하기 힘들 수도 있어요.\n\n관심 있으신 분들은 빨리 확인해보세요~`
+      content: `요즘 SNS에서 핫한 상품 발견했어요~\n\n${product.name}\n\n가성비 좋고 품질도 좋다고 소문난 제품이에요.\n지금 할인 중이라 이 가격에 구매하기 힘들 수도 있어요.\n\n관심 있으신 분들은 빨리 확인해보세요~`,
+      style: 'fallback'
     };
   }
 }
@@ -805,14 +781,40 @@ async function main() {
   try {
     await checkAndLogin();
 
+    // 일일 게시 카운터
+    const DAILY_LIMIT = 200;
+    let dailyCount = 0;
+    let lastResetDate = new Date().toDateString();
+
     while (true) {
+      // 날짜 바뀌면 카운터 리셋
+      const today = new Date().toDateString();
+      if (today !== lastResetDate) {
+        log(`\n🔄 날짜 변경 감지 - 일일 카운터 리셋 (이전: ${dailyCount}개)`);
+        dailyCount = 0;
+        lastResetDate = today;
+      }
+
+      // 일일 한도 체크
+      if (dailyCount >= DAILY_LIMIT) {
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        const waitMs = tomorrow - now;
+        log(`\n⏸️ 일일 한도 도달 (${dailyCount}/${DAILY_LIMIT}개)`);
+        log(`   내일 00:00까지 ${Math.round(waitMs / 3600000)}시간 대기...`);
+        await page.waitForTimeout(waitMs);
+        continue;
+      }
+
       if (worker) {
         try {
           await updateWorkerHeartbeat(worker.id);
         } catch (e) {}
       }
 
-      log('\n📊 Supabase에서 상품 조회 중...');
+      log(`\n📊 Supabase에서 상품 조회 중... (오늘: ${dailyCount}/${DAILY_LIMIT}개)`);
       const products = await getProductsForPosting('cafe', 1);
 
       if (!products || products.length === 0) {
@@ -830,7 +832,29 @@ async function main() {
       const affiliateLink = product.affiliate_link || '';
 
       const images = await getProductImages(page, productUrl, affiliateLink);
+
+      // 이미지가 하나도 없으면 (삭제된 페이지/IP밴) 다음 상품으로
+      if (!images || images.length === 0) {
+        log(`  [SKIP] No images - page deleted or blocked. Moving to next product...`);
+        try {
+          await recordPost(
+            product.product_id,
+            worker?.id || null,
+            'cafe',
+            false,
+            'No images - page unavailable'
+          );
+        } catch (e) {}
+        await page.waitForTimeout(3000);
+        continue;
+      }
+
       const success = await writePost(page, product, images, doLogin);
+
+      if (success) {
+        dailyCount++;
+        log(`  ✅ 오늘 게시 완료: ${dailyCount}/${DAILY_LIMIT}개`);
+      }
 
       try {
         await recordPost(
@@ -838,18 +862,19 @@ async function main() {
           worker?.id || null,
           'cafe',
           success,
-          success ? null : '게시 실패'
+          success ? null : 'Post failed'
         );
-        log(`  📝 게시 기록 저장 완료`);
+        log(`  Post record saved`);
       } catch (e) {
-        log(`  ⚠️ 게시 기록 저장 실패: ${e.message}`);
+        log(`  Warning: Failed to save record: ${e.message}`);
       }
 
       for (const img of images) {
         try { fs.unlinkSync(img); } catch (e) {}
       }
 
-      const waitTime = 5 * 60 * 1000 + Math.random() * 5 * 60 * 1000;
+      // 빠르게 작성 (2~3분 간격)
+      const waitTime = 2 * 60 * 1000 + Math.random() * 1 * 60 * 1000;
       log(`다음 글까지 ${Math.round(waitTime / 60000)}분 대기...`);
       await page.waitForTimeout(waitTime);
     }
