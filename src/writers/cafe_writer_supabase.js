@@ -179,66 +179,70 @@ async function getProductImages(page, productUrl, affiliateLink = '') {
       log(`  affiliateLink에서 실제 스토어 URL 추출 중...`);
       const realUrl = await getRedirectUrl(page, affiliateLink);
 
-      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver'))) {
-        log(`  스마트스토어 URL: ${realUrl.substring(0, 50)}...`);
+      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
+        log(`  스토어 URL: ${realUrl.substring(0, 50)}...`);
         imageUrls = await getSmartStoreImages(page, realUrl);
-        log(`  스마트스토어에서 이미지 ${imageUrls.length}개 발견`);
+        log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
       }
     }
 
-    if (imageUrls.length === 0) {
-      log(`  Brand Connect 페이지에서 이미지 검색...`);
-      const productPage = await page.context().newPage();
-      await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await productPage.waitForTimeout(3000);
-      await productPage.evaluate(() => window.scrollBy(0, 500));
-      await productPage.waitForTimeout(2000);
+    // affiliate_link에서 이미지를 못 찾은 경우, 리다이렉트된 URL로 재시도
+    if (imageUrls.length === 0 && affiliateLink) {
+      log(`  리다이렉트 URL에서 이미지 검색...`);
+      const realUrl = await getRedirectUrl(page, affiliateLink);
+      if (realUrl) {
+        const productPage = await page.context().newPage();
+        await productPage.goto(realUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await productPage.waitForTimeout(3000);
+        await productPage.evaluate(() => window.scrollBy(0, 500));
+        await productPage.waitForTimeout(2000);
 
-      imageUrls = await productPage.evaluate(() => {
-        const urls = [];
-        const selectors = [
-          '.Thumbnail_img__midGQ',
-          '[class*="Thumbnail"] img',
-          'img[class*="ImageLazyLoader"]',
-          'img[src*="phinf"]',
-          'img[src*="shop"]',
-          'img[src*="product"]'
-        ];
+        imageUrls = await productPage.evaluate(() => {
+          const urls = [];
+          const selectors = [
+            '.Thumbnail_img__midGQ',
+            '[class*="Thumbnail"] img',
+            'img[class*="ImageLazyLoader"]',
+            'img[src*="phinf"]',
+            'img[src*="shop"]',
+            'img[src*="product"]'
+          ];
 
-        for (const selector of selectors) {
-          const images = document.querySelectorAll(selector);
-          images.forEach(img => {
-            let src = img.src || img.getAttribute('data-src');
-            if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
-              if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
-                  src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
-                  src.includes('icon') || src.includes('blank') || src.includes('avatar') ||
-                  src.includes('Badge') || src.includes('badge') || src.includes('_next/static/media')) {
-                return;
+          for (const selector of selectors) {
+            const images = document.querySelectorAll(selector);
+            images.forEach(img => {
+              let src = img.src || img.getAttribute('data-src');
+              if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
+                if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
+                    src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
+                    src.includes('icon') || src.includes('blank') || src.includes('avatar') ||
+                    src.includes('Badge') || src.includes('badge') || src.includes('_next/static/media')) {
+                  return;
+                }
+
+                if (src.includes('dthumb-phinf.pstatic.net') && src.includes('src=')) {
+                  try {
+                    const urlParams = new URL(src).searchParams;
+                    let originalSrc = urlParams.get('src');
+                    if (originalSrc) {
+                      originalSrc = decodeURIComponent(originalSrc).replace(/^"|"$/g, '');
+                      src = originalSrc;
+                    }
+                  } catch (e) {}
+                }
+
+                if (src.startsWith('//')) src = 'https:' + src;
+                src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
+                if (!urls.includes(src)) urls.push(src);
               }
+            });
+          }
+          return urls.slice(0, 5);
+        });
 
-              if (src.includes('dthumb-phinf.pstatic.net') && src.includes('src=')) {
-                try {
-                  const urlParams = new URL(src).searchParams;
-                  let originalSrc = urlParams.get('src');
-                  if (originalSrc) {
-                    originalSrc = decodeURIComponent(originalSrc).replace(/^"|"$/g, '');
-                    src = originalSrc;
-                  }
-                } catch (e) {}
-              }
-
-              if (src.startsWith('//')) src = 'https:' + src;
-              src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
-              if (!urls.includes(src)) urls.push(src);
-            }
-          });
-        }
-        return urls.slice(0, 5);
-      });
-
-      log(`  Brand Connect 이미지 발견: ${imageUrls.length}개`);
-      await productPage.close();
+        log(`  리다이렉트 페이지에서 이미지 발견: ${imageUrls.length}개`);
+        await productPage.close();
+      }
     }
 
     // 첫 번째 이미지는 로고/배너일 가능성 높아서 스킵
