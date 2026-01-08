@@ -112,6 +112,33 @@ async function getSmartStoreImages(page, storeUrl) {
     await productPage.goto(storeUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await productPage.waitForTimeout(3000);
 
+    // CAPTCHA 감지 및 대기
+    const hasCaptcha = await productPage.evaluate(() =>
+      document.body.innerText.includes('보안 확인') ||
+      document.body.innerText.includes('캡차')
+    );
+
+    if (hasCaptcha) {
+      log(`  ⚠️ CAPTCHA 감지됨 - 수동으로 풀어주세요 (60초 대기)...`);
+      for (let i = 0; i < 12; i++) {
+        await productPage.waitForTimeout(5000);
+        const stillCaptcha = await productPage.evaluate(() =>
+          document.body.innerText.includes('보안 확인') ||
+          document.body.innerText.includes('캡차')
+        );
+        if (!stillCaptcha) {
+          log(`  ✅ CAPTCHA 해결됨! 계속 진행...`);
+          await productPage.waitForTimeout(2000);
+          break;
+        }
+        if (i === 11) {
+          log(`  ❌ CAPTCHA 대기 시간 초과`);
+          await productPage.close();
+          return imageUrls;
+        }
+      }
+    }
+
     const mainImages = await productPage.$$eval('img', imgs => {
       return imgs
         .map(img => ({
