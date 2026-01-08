@@ -335,22 +335,25 @@ async function insertQuote(page, text) {
   await page.waitForTimeout(500);
 }
 
-// 볼드 처리하며 텍스트 입력 (Ctrl+B 토글)
-async function typeWithBold(page, text) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+// 볼드 처리하며 텍스트 입력 (Ctrl+B 토글) - 여러 줄 지원
+async function typeWithBold(page, text, isBoldActive = false) {
+  let boldState = isBoldActive;
+
+  // ** 마커를 기준으로 분리 (마커 자체도 배열에 포함)
+  const parts = text.split(/(\*\*)/g);
 
   for (const part of parts) {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      const boldText = part.slice(2, -2);
+    if (part === '**') {
+      // 볼드 토글
       await page.keyboard.press('Control+b');
       await page.waitForTimeout(100);
-      await page.keyboard.type(boldText, { delay: 15 });
-      await page.keyboard.press('Control+b');
-      await page.waitForTimeout(100);
+      boldState = !boldState;
     } else if (part) {
-      await page.keyboard.type(part, { delay: 10 });
+      await page.keyboard.type(part, { delay: boldState ? 15 : 10 });
     }
   }
+
+  return boldState;  // 다음 줄에서 사용할 볼드 상태 반환
 }
 
 // 해시태그 생성 (블로그용 - 15~30개, 상품 관련만)
@@ -652,9 +655,10 @@ async function writePost(page, product, images, doLoginFn) {
         }
       } else {
         const lines = part.content.split('\n');
+        let boldState = false;  // 볼드 상태 추적 (여러 줄에 걸친 볼드 지원)
         for (const line of lines) {
           if (line.trim()) {
-            await typeWithBold(page, line);
+            boldState = await typeWithBold(page, line, boldState);
             lineCounter++;
             await page.waitForTimeout(100);
 
