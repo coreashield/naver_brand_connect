@@ -508,10 +508,10 @@ async function writePost(page, product, images, doLoginFn) {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
 
-    // 2. 첫 번째 이미지만 업로드
-    if (images.length > 0) {
-      log(`  [2/6] 첫 번째 이미지 업로드...`);
-      await uploadSingleImage(images[0]);
+    // 2. 첫 번째 이미지만 업로드 (1,2번 스킵 → 3번부터 사용)
+    if (images.length > 2) {
+      log(`  [2/6] 첫 번째 이미지 업로드 (3번째 이미지)...`);
+      await uploadSingleImage(images[2]);
       await page.waitForTimeout(1000);
       log(`  ✅ 첫 번째 이미지 업로드 완료`);
     }
@@ -578,10 +578,10 @@ async function writePost(page, product, images, doLoginFn) {
     await page.waitForTimeout(500);
     log(`  ✅ 본문 입력 완료`);
 
-    // 5. 나머지 이미지 업로드 (2번째, 3번째)
-    if (images.length > 1) {
+    // 5. 나머지 이미지 업로드 (4번째부터)
+    if (images.length > 3) {
       log(`  [4/6] 나머지 이미지 업로드...`);
-      const remainingImages = images.slice(1);
+      const remainingImages = images.slice(3);
 
       try {
         const [fileChooser] = await Promise.all([

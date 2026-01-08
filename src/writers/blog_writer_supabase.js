@@ -563,10 +563,10 @@ async function writePost(page, product, images, doLoginFn) {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
 
-    // 3. 첫 번째 이미지 업로드
-    if (images.length > 0) {
-      log(`  [3/7] 첫 번째 이미지 업로드...`);
-      await uploadSingleImage(images[0]);
+    // 3. 첫 번째 이미지 업로드 (1,2번 스킵 → 3번부터 사용)
+    if (images.length > 2) {
+      log(`  [3/7] 첫 번째 이미지 업로드 (3번째 이미지)...`);
+      await uploadSingleImage(images[2]);
       await page.waitForTimeout(1000);
       log(`  ✅ 첫 번째 이미지 업로드 완료`);
     }
@@ -611,8 +611,8 @@ async function writePost(page, product, images, doLoginFn) {
       parts.push({ type: 'text', content: content.slice(lastIndex) });
     }
 
-    // 중간 이미지 준비 (첫번째, 마지막 제외)
-    const middleImages = images.length > 2 ? images.slice(1, -1) : [];
+    // 중간 이미지 준비 (1,2,3번째와 마지막 제외 → 4번째부터)
+    const middleImages = images.length > 4 ? images.slice(3, -1) : [];
     let middleImageIndex = 0;
     let quoteIndex = 0;
 

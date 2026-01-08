@@ -91,22 +91,22 @@ export async function getAllProducts() {
 
 /**
  * 게시 횟수가 적은 상품 조회 (플랫폼별)
- * - 최근 30분 이내 게시된 상품 제외 (동시 실행 방지)
- * - 상위 5개 중 랜덤 선택 (다양성 확보)
+ * - 최근 24시간 이내 게시된 상품 제외 (중복 방지 강화)
+ * - 상위 50개 중 랜덤 선택 (다양성 확보 + 중복 방지)
  */
 export async function getProductsForPosting(platform, limit = 1) {
-  // 최근 30분 이내 게시된 상품 ID 조회
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  // 최근 24시간 이내 게시된 상품 ID 조회 (중복 방지 강화)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: recentPosts } = await supabase
     .from('posts')
     .select('product_id')
     .eq('platform', platform)
-    .gte('posted_at', thirtyMinAgo);
+    .gte('posted_at', oneDayAgo);
 
   const recentProductIds = recentPosts?.map(p => p.product_id) || [];
 
-  // 상위 5개 후보 조회
+  // 상위 50개 후보 조회 (중복 방지를 위해 풀 확대)
   let query = supabase
     .from('product_post_counts')
     .select('*')
@@ -114,7 +114,7 @@ export async function getProductsForPosting(platform, limit = 1) {
     .not('affiliate_link', 'is', null)
     .order(platform === 'cafe' ? 'cafe_count' : 'blog_count', { ascending: true })
     .order('total_count', { ascending: true })
-    .limit(5);
+    .limit(50);
 
   const { data, error } = await query;
 
