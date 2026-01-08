@@ -397,6 +397,18 @@ export async function getNaverUrlStats() {
   };
 }
 
+/**
+ * 상품 삭제 (삭제된 Brand Connect 상품)
+ */
+export async function deleteProduct(productId) {
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('product_id', productId);
+
+  if (error) throw error;
+}
+
 export default {
   supabase,
   upsertProduct,
@@ -416,5 +428,6 @@ export default {
   testConnection,
   updateNaverShoppingUrl,
   getProductsWithoutNaverUrl,
-  getNaverUrlStats
+  getNaverUrlStats,
+  deleteProduct
 };
