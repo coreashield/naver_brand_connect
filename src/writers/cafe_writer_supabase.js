@@ -103,13 +103,41 @@ async function getRedirectUrl(page, shortUrl) {
   }
 }
 
+// /main/ URL을 실제 스토어 URL로 변환 (CAPTCHA 우회)
+async function resolveStoreUrl(url) {
+  if (!url || !url.includes('/main/products/')) {
+    return url;
+  }
+
+  try {
+    const { execSync } = await import('child_process');
+    const cmd = `curl -sI "${url}" 2>/dev/null | grep -i "^location:" | head -1`;
+    const result = execSync(cmd, { encoding: 'utf-8', timeout: 10000 }).trim();
+
+    if (result) {
+      const location = result.replace(/^location:\s*/i, '').trim();
+      if (location.startsWith('/')) {
+        const baseUrl = new URL(url);
+        const actualUrl = `${baseUrl.protocol}//${baseUrl.host}${location}`;
+        log(`  실제 스토어 URL: ${actualUrl}`);
+        return actualUrl;
+      }
+    }
+  } catch (e) {
+    log(`  스토어 URL 변환 실패: ${e.message}`);
+  }
+
+  return url;
+}
+
 // 스마트스토어에서 상품 이미지 가져오기
 async function getSmartStoreImages(page, storeUrl) {
   const imageUrls = [];
+  const actualUrl = await resolveStoreUrl(storeUrl);
 
   try {
     const productPage = await page.context().newPage();
-    await productPage.goto(storeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await productPage.goto(actualUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await productPage.waitForTimeout(3000);
 
     const mainImages = await productPage.$$eval('img', imgs => {
@@ -124,7 +152,12 @@ async function getSmartStoreImages(page, storeUrl) {
         .filter(img => img.src && img.src.includes('http'))
         .filter(img =>
           img.src.includes('shop-phinf') ||
-          img.src.includes('shopping-phinf')
+          img.src.includes('shopping-phinf') ||
+          img.src.includes('phinf.pstatic.net') ||
+          img.src.includes('shop.pstatic.net') ||
+          img.src.includes('nasmedia-phinf') ||
+          img.src.includes('nv-phinf') ||
+          (img.width >= 200 && img.height >= 200)
         )
         .filter(img =>
           !img.src.includes('logo') &&
@@ -182,30 +215,17 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
       log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
     }
 
-    // 2순위: affiliateLink 사용 (방문 카운트 +1)
-    if (imageUrls.length === 0 && affiliateLink && affiliateLink.includes('naver.me')) {
-      log(`  affiliateLink 폴백 사용 (방문카운트 +1)...`);
-      const realUrl = await getRedirectUrl(page, affiliateLink);
-
-      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
-        log(`  스토어 URL: ${realUrl.substring(0, 50)}...`);
-        imageUrls = await getSmartStoreImages(page, realUrl);
-        log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
-      }
-    }
-
-    // affiliate_link에서 이미지를 못 찾은 경우, 리다이렉트된 URL로 재시도
-    if (imageUrls.length === 0 && affiliateLink) {
-      log(`  리다이렉트 URL에서 이미지 검색...`);
-      const realUrl = await getRedirectUrl(page, affiliateLink);
-      if (realUrl) {
-        const productPage = await page.context().newPage();
-        await productPage.goto(realUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    // 2순위: Brand Connect 페이지에서 이미지 추출 (방문 카운트 없음)
+    if (imageUrls.length === 0) {
+      log(`  Brand Connect 페이지에서 이미지 검색 (방문카운트 X)...`);
+      const productPage = await page.context().newPage();
+      try {
+        await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
         await productPage.waitForTimeout(3000);
         await productPage.evaluate(() => window.scrollBy(0, 500));
         await productPage.waitForTimeout(2000);
 
-        imageUrls = await productPage.evaluate(() => {
+        const bcImages = await productPage.evaluate(() => {
           const urls = [];
           const selectors = [
             '.Thumbnail_img__midGQ',
@@ -248,8 +268,23 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
           return urls.slice(0, 5);
         });
 
-        log(`  리다이렉트 페이지에서 이미지 발견: ${imageUrls.length}개`);
-        await productPage.close();
+        imageUrls.push(...bcImages);
+        log(`  Brand Connect에서 이미지 ${bcImages.length}개 발견`);
+      } catch (e) {
+        log(`  Brand Connect 이미지 추출 실패: ${e.message}`);
+      }
+      await productPage.close();
+    }
+
+    // 3순위: affiliateLink 사용 (방문 카운트 +1) - 최후의 수단
+    if (imageUrls.length === 0 && affiliateLink && affiliateLink.includes('naver.me')) {
+      log(`  ⚠️ affiliateLink 폴백 사용 (방문카운트 +1)...`);
+      const realUrl = await getRedirectUrl(page, affiliateLink);
+
+      if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
+        log(`  스토어 URL: ${realUrl.substring(0, 50)}...`);
+        imageUrls = await getSmartStoreImages(page, realUrl);
+        log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
       }
     }
 

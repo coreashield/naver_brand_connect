@@ -110,13 +110,45 @@ async function getRedirectUrl(page, shortUrl) {
   }
 }
 
+// /main/ URL을 실제 스토어 URL로 변환 (CAPTCHA 우회)
+async function resolveStoreUrl(url) {
+  if (!url || !url.includes('/main/products/')) {
+    return url;  // 이미 실제 스토어 URL이면 그대로 반환
+  }
+
+  try {
+    // HTTP HEAD 요청으로 redirect location만 가져오기
+    const { execSync } = await import('child_process');
+    const cmd = `curl -sI "${url}" 2>/dev/null | grep -i "^location:" | head -1`;
+    const result = execSync(cmd, { encoding: 'utf-8', timeout: 10000 }).trim();
+
+    if (result) {
+      const location = result.replace(/^location:\s*/i, '').trim();
+      if (location.startsWith('/')) {
+        // 상대 경로면 절대 경로로 변환
+        const baseUrl = new URL(url);
+        const actualUrl = `${baseUrl.protocol}//${baseUrl.host}${location}`;
+        log(`  실제 스토어 URL: ${actualUrl}`);
+        return actualUrl;
+      }
+    }
+  } catch (e) {
+    log(`  스토어 URL 변환 실패: ${e.message}`);
+  }
+
+  return url;  // 실패 시 원래 URL 반환
+}
+
 // 스마트스토어에서 상품 이미지 가져오기
 async function getSmartStoreImages(page, storeUrl) {
   const imageUrls = [];
 
+  // /main/ URL이면 실제 스토어 URL로 변환
+  const actualUrl = await resolveStoreUrl(storeUrl);
+
   try {
     const productPage = await page.context().newPage();
-    await productPage.goto(storeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await productPage.goto(actualUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await productPage.waitForTimeout(3000);
 
     const mainImages = await productPage.$$eval('img', imgs => {
@@ -131,7 +163,12 @@ async function getSmartStoreImages(page, storeUrl) {
         .filter(img => img.src && img.src.includes('http'))
         .filter(img =>
           img.src.includes('shop-phinf') ||
-          img.src.includes('shopping-phinf')
+          img.src.includes('shopping-phinf') ||
+          img.src.includes('phinf.pstatic.net') ||
+          img.src.includes('shop.pstatic.net') ||
+          img.src.includes('nasmedia-phinf') ||
+          img.src.includes('nv-phinf') ||
+          (img.width >= 200 && img.height >= 200)  // 일정 크기 이상 이미지도 포함
         )
         .filter(img =>
           !img.src.includes('logo') &&
@@ -189,9 +226,71 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
       log(`  스토어에서 이미지 ${imageUrls.length}개 발견`);
     }
 
-    // 2순위: affiliateLink 사용 (방문 카운트 +1)
+    // 2순위: Brand Connect 페이지에서 이미지 추출 (방문 카운트 없음)
+    // naver_shopping_url이 CAPTCHA 등으로 실패했을 때
+    if (imageUrls.length === 0) {
+      log(`  Brand Connect 페이지에서 이미지 검색 (방문카운트 X)...`);
+      const productPage = await page.context().newPage();
+      try {
+        await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await productPage.waitForTimeout(3000);
+        await productPage.evaluate(() => window.scrollBy(0, 500));
+        await productPage.waitForTimeout(2000);
+
+        const bcImages = await productPage.evaluate(() => {
+          const urls = [];
+          const selectors = [
+            '.Thumbnail_img__midGQ',
+            '[class*="Thumbnail"] img',
+            'img[class*="ImageLazyLoader"]',
+            'img[src*="phinf"]',
+            'img[src*="shop"]',
+            'img[src*="product"]'
+          ];
+
+          for (const selector of selectors) {
+            const images = document.querySelectorAll(selector);
+            images.forEach(img => {
+              let src = img.src || img.getAttribute('data-src');
+              if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
+                if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
+                    src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
+                    src.includes('icon') || src.includes('blank') || src.includes('avatar') ||
+                    src.includes('Badge') || src.includes('badge') || src.includes('_next/static/media')) {
+                  return;
+                }
+
+                if (src.includes('dthumb-phinf.pstatic.net') && src.includes('src=')) {
+                  try {
+                    const urlParams = new URL(src).searchParams;
+                    let originalSrc = urlParams.get('src');
+                    if (originalSrc) {
+                      originalSrc = decodeURIComponent(originalSrc).replace(/^"|"$/g, '');
+                      src = originalSrc;
+                    }
+                  } catch (e) {}
+                }
+
+                if (src.startsWith('//')) src = 'https:' + src;
+                src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
+                if (!urls.includes(src)) urls.push(src);
+              }
+            });
+          }
+          return urls.slice(0, 10);
+        });
+
+        imageUrls.push(...bcImages);
+        log(`  Brand Connect에서 이미지 ${bcImages.length}개 발견`);
+      } catch (e) {
+        log(`  Brand Connect 이미지 추출 실패: ${e.message}`);
+      }
+      await productPage.close();
+    }
+
+    // 3순위: affiliateLink 사용 (방문 카운트 +1) - 최후의 수단
     if (imageUrls.length === 0 && affiliateLink && affiliateLink.includes('naver.me')) {
-      log(`  affiliateLink 폴백 사용 (방문카운트 +1)...`);
+      log(`  ⚠️ affiliateLink 폴백 사용 (방문카운트 +1)...`);
       const realUrl = await getRedirectUrl(page, affiliateLink);
 
       if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
@@ -201,62 +300,9 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
       }
     }
 
-    if (imageUrls.length < MIN_IMAGES) {
-      log(`  Brand Connect 페이지에서 추가 이미지 검색...`);
-      const productPage = await page.context().newPage();
-      await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await productPage.waitForTimeout(3000);
-      await productPage.evaluate(() => window.scrollBy(0, 500));
-      await productPage.waitForTimeout(2000);
-
-      const bcImages = await productPage.evaluate(() => {
-        const urls = [];
-        const selectors = [
-          '.Thumbnail_img__midGQ',
-          '[class*="Thumbnail"] img',
-          'img[class*="ImageLazyLoader"]',
-          'img[src*="phinf"]',
-          'img[src*="shop"]',
-          'img[src*="product"]'
-        ];
-
-        for (const selector of selectors) {
-          const images = document.querySelectorAll(selector);
-          images.forEach(img => {
-            let src = img.src || img.getAttribute('data-src');
-            if (src && (src.includes('shop') || src.includes('product') || src.includes('phinf') || src.includes('pstatic'))) {
-              if (src.includes('error') || src.includes('noimage') || src.includes('no_image') ||
-                  src.includes('placeholder') || src.includes('exclamation') || src.includes('logo') ||
-                  src.includes('icon') || src.includes('blank') || src.includes('avatar') ||
-                  src.includes('Badge') || src.includes('badge') || src.includes('_next/static/media')) {
-                return;
-              }
-
-              if (src.includes('dthumb-phinf.pstatic.net') && src.includes('src=')) {
-                try {
-                  const urlParams = new URL(src).searchParams;
-                  let originalSrc = urlParams.get('src');
-                  if (originalSrc) {
-                    originalSrc = decodeURIComponent(originalSrc).replace(/^"|"$/g, '');
-                    src = originalSrc;
-                  }
-                } catch (e) {}
-              }
-
-              if (src.startsWith('//')) src = 'https:' + src;
-              src = src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
-              if (!urls.includes(src)) urls.push(src);
-            }
-          });
-        }
-        return urls.slice(0, 10);
-      });
-
-      imageUrls.push(...bcImages);
-      imageUrls = [...new Set(imageUrls)];  // 중복 제거
-      log(`  Brand Connect 추가 이미지 발견: ${bcImages.length}개`);
-      await productPage.close();
-    }
+    // 이미 2순위에서 Brand Connect 이미지를 시도했으므로 여기서는 스킵
+    // 중복 제거만 수행
+    imageUrls = [...new Set(imageUrls)];
 
     // 5~8장 다운로드 (첫 번째 이미지는 로고/배너일 가능성 높아서 스킵)
     const startIndex = imageUrls.length > MIN_IMAGES ? 1 : 0;  // 이미지 충분하면 첫 번째 스킵
