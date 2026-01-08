@@ -116,7 +116,7 @@ async function getSmartStoreImages(page, storeUrl) {
 
   try {
     const productPage = await page.context().newPage();
-    await productPage.goto(storeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await productPage.goto(storeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await productPage.waitForTimeout(3000);
 
     // CAPTCHA 감지 및 대기
@@ -232,7 +232,7 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
     if (imageUrls.length < MIN_IMAGES) {
       log(`  Brand Connect 페이지에서 추가 이미지 검색...`);
       const productPage = await page.context().newPage();
-      await productPage.goto(productUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      await productPage.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await productPage.waitForTimeout(3000);
       await productPage.evaluate(() => window.scrollBy(0, 500));
       await productPage.waitForTimeout(2000);
