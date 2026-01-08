@@ -760,7 +760,10 @@ async function writePost(page, product, images, doLoginFn) {
       // 발행 완료 버튼 찾기 (여러 가지 선택자 시도)
       const finalPublishBtn = await mainFrame.$('button.confirm_btn__Ky5Rv, button.publish_layer_btn__fLQ75, button[class*="confirm"], button:has-text("발행")');
       if (finalPublishBtn) {
-        await finalPublishBtn.click();
+        // 버튼이 보이도록 스크롤 후 강제 클릭
+        await finalPublishBtn.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(500);
+        await finalPublishBtn.click({ force: true });
         log('  ✅ 최종 발행 버튼 클릭');
         await page.waitForTimeout(3000);
       } else {
@@ -769,7 +772,9 @@ async function writePost(page, product, images, doLoginFn) {
         for (const btn of buttons) {
           const text = await btn.textContent();
           if (text && text.includes('발행')) {
-            await btn.click();
+            await btn.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(500);
+            await btn.click({ force: true });
             log('  ✅ 최종 발행 버튼 클릭 (텍스트 매칭)');
             await page.waitForTimeout(3000);
             break;

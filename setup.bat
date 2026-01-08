@@ -15,10 +15,32 @@ set "EXTRACT_DIR=packages"
 :: Check if already installed
 if exist "%EXTRACT_DIR%\node\node.exe" (
     echo [!] Already installed.
-    echo     Delete packages folder to reinstall.
     echo.
-    pause
-    exit /b 0
+    echo [1] Update source code only (fast)
+    echo [2] Full reinstall (delete packages folder first)
+    echo [3] Exit
+    echo.
+    set /p CHOICE="Select option (1/2/3): "
+
+    if "!CHOICE!"=="1" (
+        echo.
+        echo Updating source code...
+        xcopy src "%EXTRACT_DIR%\src" /E /Y /I >nul
+        copy .env "%EXTRACT_DIR%\.env" /Y >nul 2>&1
+        echo.
+        echo [OK] Source code updated!
+        pause
+        exit /b 0
+    )
+    if "!CHOICE!"=="2" (
+        echo.
+        echo Removing packages folder...
+        rmdir /S /Q "%EXTRACT_DIR%"
+        echo Done. Proceeding with fresh install...
+        echo.
+    ) else (
+        exit /b 0
+    )
 )
 
 :: Check for curl
@@ -58,7 +80,12 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [3/3] Cleaning up...
+echo [3/3] Copying latest source code...
+xcopy src "%EXTRACT_DIR%\src" /E /Y /I >nul
+copy .env "%EXTRACT_DIR%\.env" /Y >nul 2>&1
+
+echo.
+echo [4/4] Cleaning up...
 del "%ZIP_FILE%" 2>nul
 
 echo.
