@@ -18,13 +18,15 @@ import {
   completeDailyIssuance,
   getProductCount,
   getProductsWithoutNaverUrl,
-  updateNaverShoppingUrl
+  updateNaverShoppingUrl,
+  getAccountById
 } from './src/supabase/db.js';
 
 dotenv.config();
 
-const NAVER_ID = process.env.NAVER_ID?.trim();
-const NAVER_PW = process.env.NAVER_PW?.trim();
+// 계정 정보 (DB에서 로드)
+const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
+let account = null;
 
 // URLs
 const CATEGORY_URL = 'https://brandconnect.naver.com/904249244338784/affiliate/products/category';
@@ -422,12 +424,21 @@ async function main() {
   const remainingQuota = limitStatus.limit - limitStatus.current;
   log(`📋 남은 할당량: ${remainingQuota}개\n`);
 
-  // 3. 기존 product_id 로드
+  // 3. 계정 로드
+  log('계정 정보 로드 중...');
+  account = await getAccountById(ACCOUNT_ID);
+  if (!account) {
+    log(`❌ 계정 ID ${ACCOUNT_ID}를 찾을 수 없습니다.`);
+    return;
+  }
+  log(`✅ 계정: ${account.naver_id}\n`);
+
+  // 4. 기존 product_id 로드
   log('기존 상품 ID 로드 중...');
   const existingIds = await getExistingProductIds();
   log(`✅ 기존 상품: ${existingIds.size}개 로드됨\n`);
 
-  // 4. 브라우저 시작
+  // 5. 브라우저 시작
   const browser = await chromium.launch({
     headless: false,
     slowMo: 20
@@ -458,9 +469,9 @@ async function main() {
     }
 
     await page.click('#id');
-    await page.keyboard.type(NAVER_ID, { delay: 50 });
+    await page.keyboard.type(account.naver_id, { delay: 50 });
     await page.click('#pw');
-    await page.keyboard.type(NAVER_PW, { delay: 50 });
+    await page.keyboard.type(account.naver_pw, { delay: 50 });
     await page.click('#log\\.login');
     await page.waitForTimeout(3000);
     log('✅ 로그인 완료\n');
