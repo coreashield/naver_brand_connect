@@ -27,6 +27,7 @@ if exist "%EXTRACT_DIR%\node\node.exe" (
         echo Updating source code...
         xcopy src "%EXTRACT_DIR%\src" /E /Y /I >nul
         copy .env "%EXTRACT_DIR%\.env" /Y >nul 2>&1
+        copy scripts\templates\*.bat "%EXTRACT_DIR%\" /Y >nul 2>&1
         echo.
         echo [OK] Source code updated!
         pause
@@ -83,6 +84,7 @@ echo.
 echo [3/3] Copying latest source code...
 xcopy src "%EXTRACT_DIR%\src" /E /Y /I >nul
 copy .env "%EXTRACT_DIR%\.env" /Y >nul 2>&1
+copy scripts\templates\*.bat "%EXTRACT_DIR%\" /Y >nul 2>&1
 
 echo.
 echo [4/4] Cleaning up...
