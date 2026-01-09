@@ -492,14 +492,41 @@ async function writeCafePost(page, product, images, doLoginFn) {
     await page.waitForTimeout(500);
 
     let registered = false;
-    const skinGreenBtn = page.locator('button.BaseButton--skinGreen');
+
+    // 1차: .BaseButton--skinGreen (a 태그)
+    const skinGreenBtn = page.locator('.BaseButton--skinGreen');
     if (await skinGreenBtn.count() > 0) {
+      log(`  등록 버튼 발견 (skinGreen), 클릭 시도...`);
       await skinGreenBtn.first().click();
       await page.waitForTimeout(5000);
       if (!page.url().includes('/write')) {
         registered = true;
         log(`  ✅ 카페 글 등록 완료!`);
       }
+    }
+
+    // 2차: 텍스트가 '등록'인 버튼/링크
+    if (!registered) {
+      const allBtns = await page.locator('.BaseButton').all();
+      for (const btn of allBtns) {
+        try {
+          const text = await btn.innerText();
+          if (text.trim() === '등록') {
+            log(`  등록 버튼 발견 (BaseButton 텍스트), 클릭 시도...`);
+            await btn.click();
+            await page.waitForTimeout(5000);
+            if (!page.url().includes('/write')) {
+              registered = true;
+              log(`  ✅ 카페 글 등록 완료!`);
+            }
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (!registered) {
+      log(`  ⚠️ 등록 버튼 못찾음 - URL: ${page.url()}`);
     }
 
     return registered;
