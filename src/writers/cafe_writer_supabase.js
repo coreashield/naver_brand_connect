@@ -29,6 +29,9 @@ const WORKER_NAME = process.env.WORKER_NAME || `cafe-${Date.now().toString(36)}`
 
 const LOG_FILE = 'output/cafe_writer.log';
 const IMAGE_DIR = 'output/images';
+const MAX_IMAGES = 5;  // 3~5장 다운로드
+const MIN_IMAGES = 3;
+const SKIP_COUNT = 2;  // 처음 2개 이미지 스킵 (로고/배너)
 
 // Gemini API 초기화
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -184,7 +187,7 @@ async function getSmartStoreImages(page, storeUrl) {
           return img.src.replace(/\?type=.*$/, '').replace(/_\d+x\d+/, '');
         })
         .filter((src, idx, arr) => arr.indexOf(src) === idx)
-        .slice(0, 5);
+        .slice(0, 10);  // 더 많이 수집
     });
 
     imageUrls.push(...mainImages);
@@ -280,26 +283,31 @@ async function getProductImages(page, productUrl, affiliateLink = '', naverShopp
       }
     }
 
-    // 첫 번째 이미지는 로고/배너일 가능성 높아서 스킵
-    const startIndex = imageUrls.length > 3 ? 1 : 0;
+    // 처음 2개 이미지는 로고/배너일 가능성 높아서 스킵 (이미지가 충분하면)
+    // 이미지가 (MIN_IMAGES + SKIP_COUNT)개 이상이면 처음 2개 스킵
+    const startIndex = imageUrls.length >= (MIN_IMAGES + SKIP_COUNT) ? SKIP_COUNT : 0;
+    const availableImages = imageUrls.length - startIndex;
+    const targetCount = Math.min(MAX_IMAGES, Math.max(MIN_IMAGES, availableImages));
     let downloadedCount = 0;
 
-    log(`  첫 번째 이미지 ${startIndex === 1 ? '스킵 (로고/배너 제외)' : '포함'}`);
+    log(`  총 ${imageUrls.length}개 이미지 중 처음 ${startIndex}개 스킵, 목표: ${targetCount}장 다운로드`);
 
-    for (let i = startIndex; i < imageUrls.length && downloadedCount < 3; i++) {
+    for (let i = startIndex; i < imageUrls.length && downloadedCount < targetCount; i++) {
       try {
-        const filename = `product_${Date.now()}_${i}.jpg`;
+        const filename = `product_${Date.now()}_${downloadedCount}.jpg`;
         const filepath = await downloadImage(imageUrls[i], filename);
         images.push(path.resolve(filepath));
         downloadedCount++;
-        log(`  이미지 다운로드 성공: ${filename}`);
+        log(`  이미지 다운로드 성공: ${filename} (${downloadedCount}/${targetCount})`);
       } catch (e) {
         log(`  이미지 다운로드 스킵: ${e.message}`);
       }
     }
 
-    if (images.length === 0) {
-      log(`  ⚠️ 유효한 이미지를 찾지 못했습니다`);
+    if (images.length < MIN_IMAGES) {
+      log(`  ⚠️ 최소 이미지 수(${MIN_IMAGES}장) 미달: ${images.length}장만 확보`);
+    } else {
+      log(`  ✅ ${images.length}장 이미지 확보 완료`);
     }
 
   } catch (e) {
@@ -517,7 +525,8 @@ async function writePost(page, product, images, doLoginFn) {
         await page.waitForTimeout(3000);
         await page.keyboard.press('Escape');
         await page.waitForTimeout(500);
-        await editorBody.click();
+        // 커서를 항상 문서 맨 끝으로 이동 (editorBody.click() 제거)
+        await page.keyboard.press('Control+End');
         await page.waitForTimeout(500);
         return true;
       } catch (e) {
@@ -526,34 +535,50 @@ async function writePost(page, product, images, doLoginFn) {
       }
     }
 
-    // === 순서대로 작업 ===
+    // === 새로운 구조: 대가성문구 → 링크 → 사진1 → 내용(이미지 분산) ===
 
-    // 1. 대가성 문구 먼저 입력
-    log(`  [1/6] 대가성 문구 입력...`);
+    // 1. 대가성 문구 입력
+    log(`  [1/5] 대가성 문구 입력...`);
     await page.keyboard.type(DISCLOSURE, { delay: 15 });
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
 
-    // 2. 첫 번째 이미지만 업로드 (1,2번 스킵 → 3번부터 사용)
-    if (images.length > 2) {
-      log(`  [2/6] 첫 번째 이미지 업로드 (3번째 이미지)...`);
-      await uploadSingleImage(images[2]);
+    // 2. 링크 먼저 입력 (미리보기 생성)
+    const affiliateLink = product.affiliate_link || product.affiliateLink || '';
+    if (affiliateLink) {
+      log(`  [2/5] 상품 링크 입력...`);
+      await page.keyboard.type(affiliateLink, { delay: 15 });
+      await page.waitForTimeout(500);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(5000);  // 미리보기 생성 대기
+      log(`  ✅ 링크 미리보기 생성 완료`);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(500);
+    }
+
+    // 3. 첫 번째 이미지 업로드 (Ctrl+End로 문서 끝으로 이동 후)
+    await page.keyboard.press('Control+End');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+
+    if (images.length > 0) {
+      log(`  [3/5] 첫 번째 이미지 업로드...`);
+      await uploadSingleImage(images[0]);
       await page.waitForTimeout(1000);
       log(`  ✅ 첫 번째 이미지 업로드 완료`);
     }
 
-    // 3. 에디터 클릭하고 본문 시작 위치로
-    await editorBody.click();
-    await page.waitForTimeout(500);
-    await page.keyboard.press('End');
+    // 이미지 업로드 후 Ctrl+End로 문서 맨 끝으로 이동
+    await page.keyboard.press('Control+End');
     await page.waitForTimeout(300);
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
 
-    // 4. 본문 직접 입력 (볼드 + 인용구 처리 포함)
-    log(`  [3/6] 본문 입력 중...`);
+    // 4. 본문 입력 (이미지 분산 삽입)
+    log(`  [4/5] 본문 + 이미지 분산 입력 중...`);
 
     let content = geminiResult.content;
 
@@ -582,18 +607,69 @@ async function writePost(page, product, images, doLoginFn) {
       parts.push({ type: 'text', content: content.slice(lastIndex) });
     }
 
+    // 중간 이미지 준비 (첫 번째 제외)
+    const middleImages = images.length > 1 ? images.slice(1) : [];
+    let middleImageIndex = 0;
+    let quoteIndex = 0;
+
+    // 인용구가 없을 경우: 줄 간격으로 이미지 분산
+    let totalLines = 0;
+    if (quoteCount === 0) {
+      for (const part of parts) {
+        if (part.type === 'text') {
+          totalLines += part.content.split('\n').filter(l => l.trim()).length;
+        }
+      }
+    }
+    const linesPerImage = quoteCount === 0 && middleImages.length > 0
+      ? Math.floor(totalLines / (middleImages.length + 1))
+      : 0;
+    let lineCounter = 0;
+
+    if (quoteCount > 0) {
+      log(`    → 중간 이미지 ${middleImages.length}장을 인용구 ${quoteCount}개 사이에 분산 삽입`);
+    } else {
+      log(`    → 인용구 없음: 중간 이미지 ${middleImages.length}장을 ${linesPerImage}줄 간격으로 분산 삽입`);
+    }
+
     for (const part of parts) {
       if (part.type === 'quote') {
         await insertQuote(page, part.content);
-        log(`    → 인용구 삽입 완료`);
+        quoteIndex++;
+        log(`    → 인용구 ${quoteIndex}/${quoteCount} 삽입 완료`);
         await page.waitForTimeout(300);
+
+        // 인용구 다음에 이미지 1장 삽입 (중간 이미지가 남아있으면)
+        if (middleImageIndex < middleImages.length) {
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(300);
+          await uploadSingleImage(middleImages[middleImageIndex]);
+          log(`    → 이미지 ${middleImageIndex + 2}/${images.length} 삽입 (인용구 ${quoteIndex} 다음)`);
+          middleImageIndex++;
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(500);
+        }
       } else {
         const lines = part.content.split('\n');
-        let boldState = false;  // 볼드 상태 추적 (여러 줄에 걸친 볼드 지원)
+        let boldState = false;
         for (const line of lines) {
           if (line.trim()) {
             boldState = await typeWithBold(page, line, boldState);
+            lineCounter++;
             await page.waitForTimeout(100);
+
+            // 인용구 없을 때: 일정 줄 간격마다 이미지 삽입
+            if (quoteCount === 0 && linesPerImage > 0 &&
+                lineCounter % linesPerImage === 0 &&
+                middleImageIndex < middleImages.length) {
+              await page.keyboard.press('Enter');
+              await page.waitForTimeout(300);
+              await uploadSingleImage(middleImages[middleImageIndex]);
+              log(`    → 이미지 ${middleImageIndex + 2}/${images.length} 삽입 (${lineCounter}줄 후)`);
+              middleImageIndex++;
+              await page.keyboard.press('Enter');
+              await page.waitForTimeout(500);
+            }
           }
           await page.keyboard.press('Enter');
           await page.waitForTimeout(100);
@@ -601,53 +677,26 @@ async function writePost(page, product, images, doLoginFn) {
       }
     }
 
+    // 남은 이미지 처리
+    while (middleImageIndex < middleImages.length) {
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+      await uploadSingleImage(middleImages[middleImageIndex]);
+      log(`    → 남은 이미지 ${middleImageIndex + 2}/${images.length} 업로드 완료`);
+      middleImageIndex++;
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(500);
+    }
+
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
-    log(`  ✅ 본문 입력 완료`);
+    log(`  ✅ 본문 + 이미지 분산 입력 완료`);
 
-    // 5. 나머지 이미지 업로드 (4번째부터)
-    if (images.length > 3) {
-      log(`  [4/6] 나머지 이미지 업로드...`);
-      const remainingImages = images.slice(3);
+    // 5. 마무리 멘트
+    log(`  [5/5] 마무리 멘트 입력...`);
 
-      try {
-        const [fileChooser] = await Promise.all([
-          page.waitForEvent('filechooser', { timeout: 10000 }),
-          page.locator('button[data-name="image"]').click()
-        ]);
-        await fileChooser.setFiles(remainingImages);
-        log(`    파일 선택 완료: ${remainingImages.length}개`);
-
-        if (remainingImages.length >= 2) {
-          await page.waitForTimeout(2000);
-          const individualBtn = page.locator('text=개별사진').first();
-          if (await individualBtn.count() > 0) {
-            await individualBtn.click();
-            log(`    개별사진 선택`);
-            await page.waitForTimeout(1000);
-          }
-        }
-
-        await page.waitForTimeout(3000);
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(500);
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(500);
-        await editorBody.click();
-        await page.waitForTimeout(1000);
-        log(`  ✅ 나머지 이미지 업로드 완료`);
-      } catch (e) {
-        log(`    나머지 이미지 업로드 실패: ${e.message}`);
-      }
-    }
-
-    // 6. 마무리 멘트 + 링크 입력
-    log(`  [5/6] 마무리 멘트 + 링크 입력...`);
-
-    // 아래 방향키 200번 눌러서 확실히 문서 맨 끝으로 이동
-    for (let i = 0; i < 200; i++) {
-      await page.keyboard.press('ArrowDown');
-    }
+    // Ctrl+End로 확실히 문서 맨 끝으로 이동
+    await page.keyboard.press('Control+End');
     await page.waitForTimeout(500);
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
@@ -655,17 +704,7 @@ async function writePost(page, product, images, doLoginFn) {
 
     await page.keyboard.type('지금 바로 확인해보세요!', { delay: 20 });
     await page.keyboard.press('Enter');
-    await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
-
-    const affiliateLink = product.affiliate_link || product.affiliateLink || '';
-    if (affiliateLink) {
-      await page.keyboard.type(affiliateLink, { delay: 15 });
-      await page.waitForTimeout(500);
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(5000);
-      log(`  ✅ 상품 링크 입력 + 미리보기 생성 완료`);
-    }
 
     // 해시태그 입력
     try {

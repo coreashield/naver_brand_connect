@@ -123,7 +123,7 @@ function buildPrompt(productInfo, style, platform = 'blog') {
   // 플랫폼별 길이 설정
   const lengthGuide = platform === 'blog'
     ? '2500-3500자 분량으로'
-    : '1500-2000자 분량으로';
+    : '800-1200자 분량으로 간결하게';
 
   // 할인 정보
   const discountInfo = (originalPrice && price)

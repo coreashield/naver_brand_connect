@@ -409,6 +409,91 @@ export async function deleteProduct(productId) {
   if (error) throw error;
 }
 
+// ==================== Daily Issuance (일일 발급 추적) ====================
+
+/**
+ * 기존 모든 product_id 조회 (중복 발급 방지용)
+ * @returns {Set<string>} product_id Set
+ */
+export async function getExistingProductIds() {
+  const { data, error } = await supabase
+    .from('products')
+    .select('product_id');
+
+  if (error) throw error;
+  return new Set(data?.map(p => p.product_id) || []);
+}
+
+/**
+ * 오늘 발급 수 조회
+ */
+export async function getTodayIssuanceCount() {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data, error } = await supabase
+    .from('daily_issuance')
+    .select('issued_count')
+    .eq('issue_date', today)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
+  return data?.issued_count || 0;
+}
+
+/**
+ * 일일 발급 카운트 증가 (PostgreSQL 함수 호출)
+ * @returns {number} 증가 후 현재 카운트
+ */
+export async function incrementDailyIssuance(incrementBy = 1) {
+  const { data, error } = await supabase
+    .rpc('increment_daily_issuance', { increment_by: incrementBy });
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 일일 한도 도달 여부 확인
+ * @param {number} limit - 일일 한도 (기본 1000)
+ * @returns {Object} { reached: boolean, current: number, limit: number }
+ */
+export async function checkDailyLimit(limit = 1000) {
+  const current = await getTodayIssuanceCount();
+  return {
+    reached: current >= limit,
+    current,
+    limit
+  };
+}
+
+/**
+ * 일일 발급 완료 처리
+ */
+export async function completeDailyIssuance() {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { error } = await supabase
+    .from('daily_issuance')
+    .update({ completed_at: new Date().toISOString() })
+    .eq('issue_date', today);
+
+  if (error) throw error;
+}
+
+/**
+ * 상품 추가 + 일일 발급 카운트 증가 (통합 함수)
+ * @returns {Object} { product: data, dailyCount: number }
+ */
+export async function upsertProductWithTracking(product) {
+  // 1. 상품 upsert
+  const productData = await upsertProduct(product);
+
+  // 2. 일일 카운트 증가
+  const dailyCount = await incrementDailyIssuance(1);
+
+  return { product: productData, dailyCount };
+}
+
 export default {
   supabase,
   upsertProduct,
@@ -429,5 +514,12 @@ export default {
   updateNaverShoppingUrl,
   getProductsWithoutNaverUrl,
   getNaverUrlStats,
-  deleteProduct
+  deleteProduct,
+  // Daily Issuance
+  getExistingProductIds,
+  getTodayIssuanceCount,
+  incrementDailyIssuance,
+  checkDailyLimit,
+  completeDailyIssuance,
+  upsertProductWithTracking
 };
