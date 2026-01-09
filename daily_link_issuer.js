@@ -156,56 +156,72 @@ async function phase1_issueLinks(page, existingIds, remainingQuota) {
         continue;
       }
 
-      // 초기 스크롤해서 상품 로드
+      // 초기 스크롤해서 모든 상품 로드 (무한 스크롤 대응)
+      log(`  📜 ${category}: 상품 로딩 중...`);
       let prevHeight = 0;
-      for (let i = 0; i < 30; i++) {
-        await page.evaluate(() => window.scrollBy(0, 800));
-        await page.waitForTimeout(200);
+      let sameHeightCount = 0;
+      for (let i = 0; i < 50; i++) {
+        await page.evaluate(() => window.scrollBy(0, 1000));
+        await page.waitForTimeout(500); // 더 긴 대기 시간
         const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-        if (currentHeight === prevHeight) break;
+        if (currentHeight === prevHeight) {
+          sameHeightCount++;
+          if (sameHeightCount >= 3) break; // 3번 연속 같으면 끝
+        } else {
+          sameHeightCount = 0;
+        }
         prevHeight = currentHeight;
       }
+
+      // 상품 개수 확인
+      const productCount = await page.evaluate(() =>
+        document.querySelectorAll('[class*="ProductItem_root"]').length
+      );
+      const issueCount = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('button')).filter(b => b.textContent?.trim() === '링크 발급').length
+      );
+      log(`  📦 ${category}: 총 ${productCount}개 상품, ${issueCount}개 발급 가능`);
+
+      // 맨 위로 스크롤
       await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500);
 
       // 카테고리 내 처리
       let issuedInCategory = 0;
-      let noButtonRetryCount = 0; // 버튼 없을 때 재시도 카운터
+      let scrollPosition = 0;
+      let noNewButtonCount = 0;
 
       while (issuedInCategory < ITEMS_PER_CATEGORY_PER_ROUND && totalIssued < remainingQuota) {
+        // 현재 화면에서 링크 발급 버튼 찾기
         let issueButtons = await page.$$('button:has-text("링크 발급")');
 
         // 버튼이 없으면 스크롤해서 더 찾기
         if (issueButtons.length === 0) {
-          if (noButtonRetryCount < 5) {
-            noButtonRetryCount++;
-            log(`  🔄 ${category}: 스크롤하여 더 찾는 중... (${noButtonRetryCount}/5)`);
-
-            // 추가 스크롤
-            for (let i = 0; i < 20; i++) {
-              await page.evaluate(() => window.scrollBy(0, 800));
-              await page.waitForTimeout(200);
-              const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-              if (currentHeight === prevHeight) break;
-              prevHeight = currentHeight;
-            }
-            await page.evaluate(() => window.scrollTo(0, 0));
-            await page.waitForTimeout(300);
+          noNewButtonCount++;
+          if (noNewButtonCount < 10) {
+            // 아래로 스크롤하며 버튼 찾기
+            scrollPosition += 600;
+            await page.evaluate((pos) => window.scrollTo(0, pos), scrollPosition);
+            await page.waitForTimeout(400);
 
             // 다시 버튼 찾기
             issueButtons = await page.$$('button:has-text("링크 발급")');
             if (issueButtons.length > 0) {
-              noButtonRetryCount = 0; // 찾았으면 리셋
+              noNewButtonCount = 0;
             }
           }
 
-          if (issueButtons.length === 0) {
+          if (issueButtons.length === 0 && noNewButtonCount >= 10) {
             if (issuedInCategory === 0) {
               categoryStats[category].empty = true;
-              log(`  📂 ${category}: 발급할 상품 없음`);
+              log(`  📂 ${category}: 발급할 상품 없음 (모두 발급됨)`);
+            } else {
+              log(`  ✅ ${category}: ${issuedInCategory}개 발급 완료 (더 이상 없음)`);
             }
             break;
           }
+
+          if (issueButtons.length === 0) continue;
         }
 
         allCategoriesEmpty = false;
