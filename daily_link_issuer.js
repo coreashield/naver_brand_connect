@@ -314,9 +314,9 @@ async function phase1_issueLinks(page, existingIds, remainingQuota) {
 
           lastProductCount = currentCount;
 
-          // 스크롤 다운
-          await page.keyboard.press('PageDown');
-          await page.waitForTimeout(800);
+          // 스크롤 다운 (End키로 빠르게)
+          await page.keyboard.press('End');
+          await page.waitForTimeout(1000);
         }
       }
     }
