@@ -15,19 +15,21 @@ import {
   recordPost,
   registerWorker,
   updateWorkerHeartbeat,
-  testConnection
+  testConnection,
+  getAccountById,
+  incrementAccountCount
 } from '../supabase/db.js';
 import { generateContent, getRandomStyle, WRITING_STYLES } from '../utils/content_generator.js';
 
 dotenv.config();
 
-// 환경 변수
-const NAVER_ID = process.env.NAVER_ID?.trim();
-const NAVER_PW = process.env.NAVER_PW?.trim();
+// 환경변수에서 계정 ID 가져오기 (기본값 1)
+const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
-const BLOG_ID = process.env.BLOG_ID?.trim() || NAVER_ID;  // BLOG_ID 없으면 NAVER_ID 사용
-const BLOG_WRITE_URL = `https://blog.naver.com/${BLOG_ID}?Redirect=Write&categoryNo=1`;
 const WORKER_NAME = process.env.WORKER_NAME || `blog-${Date.now().toString(36)}`;
+
+// DB에서 로드할 계정 정보
+let account = null;
 
 // 파일 경로
 const IMAGE_DIR = 'output/images';
@@ -489,14 +491,18 @@ async function writePost(page, product, images, doLoginFn) {
 
     const geminiResult = await generateContentWithGemini(product);
 
-    await page.goto(BLOG_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    // 계정에서 블로그 URL 생성
+    const blogId = account?.blog_id || account?.naver_id || 'unknown';
+    const blogWriteUrl = `https://blog.naver.com/${blogId}?Redirect=Write&categoryNo=1`;
+
+    await page.goto(blogWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(3000);
 
     const currentUrl = page.url();
     if (currentUrl.includes('nidlogin') || currentUrl.includes('login')) {
       log('  세션 만료 - 재로그인...');
       await doLoginFn();
-      await page.goto(BLOG_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(blogWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
       await page.waitForTimeout(3000);
     }
 
@@ -895,22 +901,51 @@ async function main() {
 
   const page = await context.newPage();
 
+  // 계정 로드 함수
+  async function loadAccount() {
+    log(`\n📌 계정 ID ${ACCOUNT_ID} 로드 중...`);
+    account = await getAccountById(ACCOUNT_ID);
+
+    if (!account) {
+      log(`❌ 계정 ID ${ACCOUNT_ID}를 찾을 수 없습니다.`);
+      log('📌 naver_accounts 테이블에 계정을 추가하거나 ACCOUNT_ID 환경변수를 확인하세요.');
+      throw new Error(`Account ID ${ACCOUNT_ID} not found`);
+    }
+
+    log(`✅ 계정 로드 완료: ${account.naver_id}`);
+    log(`   카페: ${account.today_cafe_count}/${account.daily_cafe_limit} (남은 횟수: ${account.cafe_remaining})`);
+    log(`   블로그: ${account.today_blog_count}/${account.daily_blog_limit} (남은 횟수: ${account.blog_remaining})`);
+    return account;
+  }
+
   async function doLogin() {
+    if (!account) {
+      await loadAccount();
+    }
     log('네이버 로그인 중...');
     await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1000);
     await page.click('#id');
-    await page.keyboard.type(NAVER_ID, { delay: 50 });
+    await page.keyboard.type(account.naver_id, { delay: 50 });
     await page.click('#pw');
-    await page.keyboard.type(NAVER_PW, { delay: 50 });
+    await page.keyboard.type(account.naver_pw, { delay: 50 });
     await page.click('#log\\.login');
     await page.waitForTimeout(5000);
     log('로그인 완료\n');
   }
 
   async function checkAndLogin() {
+    // 먼저 계정 로드
+    if (!account) {
+      await loadAccount();
+    }
+
+    // 블로그 글쓰기 URL 생성 (계정의 blog_id 또는 naver_id 사용)
+    const blogId = account.blog_id || account.naver_id;
+    const blogWriteUrl = `https://blog.naver.com/${blogId}?Redirect=Write&categoryNo=1`;
+
     log('로그인 상태 확인 중...');
-    await page.goto(BLOG_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(blogWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const currentUrl = page.url();
@@ -929,13 +964,29 @@ async function main() {
     await checkAndLogin();
 
     while (true) {
+      // 계정 정보 새로고침 (날짜 변경 시 자동 리셋됨)
+      await loadAccount();
+
+      // 일일 한도 체크 (DB 기반)
+      if (account.blog_remaining <= 0) {
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        const waitMs = tomorrow - now;
+        log(`\n⏸️ 블로그 일일 한도 도달 (${account.today_blog_count}/${account.daily_blog_limit}개)`);
+        log(`   내일 00:00까지 ${Math.round(waitMs / 3600000)}시간 대기...`);
+        await page.waitForTimeout(waitMs);
+        continue;
+      }
+
       if (worker) {
         try {
           await updateWorkerHeartbeat(worker.id);
         } catch (e) {}
       }
 
-      log('\n📊 Supabase에서 상품 조회 중...');
+      log(`\n📊 Supabase에서 상품 조회 중... (오늘: ${account.today_blog_count}/${account.daily_blog_limit}개, 남음: ${account.blog_remaining}개)`);
       const products = await getProductsForPosting('blog', 1);
 
       if (!products || products.length === 0) {
@@ -972,6 +1023,12 @@ async function main() {
       }
 
       const success = await writePost(page, product, images, doLogin);
+
+      if (success) {
+        // DB에 카운트 증가
+        const newCount = await incrementAccountCount(ACCOUNT_ID, 'blog');
+        log(`  ✅ 오늘 블로그 게시 완료: ${newCount}/${account.daily_blog_limit}개`);
+      }
 
       try {
         await recordPost(

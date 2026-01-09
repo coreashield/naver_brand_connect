@@ -16,16 +16,20 @@ import {
   recordPost,
   registerWorker,
   updateWorkerHeartbeat,
-  testConnection
+  testConnection,
+  getAccountById,
+  incrementAccountCount
 } from '../supabase/db.js';
 
 dotenv.config();
 
-const NAVER_ID = process.env.NAVER_ID?.trim();
-const NAVER_PW = process.env.NAVER_PW?.trim();
+// 환경변수에서 계정 ID 가져오기 (기본값 1)
+const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
-const CAFE_WRITE_URL = process.env.CAFE_ADR?.trim() || 'https://cafe.naver.com/ca-fe/cafes/31634939/articles/write?boardType=L';
 const WORKER_NAME = process.env.WORKER_NAME || `cafe-${Date.now().toString(36)}`;
+
+// DB에서 로드할 계정 정보
+let account = null;
 
 const LOG_FILE = 'output/cafe_writer.log';
 const IMAGE_DIR = 'output/images';
@@ -470,14 +474,17 @@ async function writePost(page, product, images, doLoginFn) {
 
     const geminiResult = await generateContentWithGemini(product);
 
-    await page.goto(CAFE_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    // 계정에서 카페 URL 가져오기
+    const cafeWriteUrl = account?.cafe_url || 'https://cafe.naver.com/ca-fe/cafes/31634939/articles/write?boardType=L';
+
+    await page.goto(cafeWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const currentUrl = page.url();
     if (currentUrl.includes('nidlogin') || currentUrl.includes('login')) {
       log('  세션 만료 - 재로그인...');
       await doLoginFn();
-      await page.goto(CAFE_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(cafeWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
       await page.waitForTimeout(2000);
     }
 
@@ -824,22 +831,48 @@ async function main() {
 
   const page = await context.newPage();
 
+  // 계정 로드 함수
+  async function loadAccount() {
+    log(`\n📌 계정 ID ${ACCOUNT_ID} 로드 중...`);
+    account = await getAccountById(ACCOUNT_ID);
+
+    if (!account) {
+      log(`❌ 계정 ID ${ACCOUNT_ID}를 찾을 수 없습니다.`);
+      log('📌 naver_accounts 테이블에 계정을 추가하거나 ACCOUNT_ID 환경변수를 확인하세요.');
+      throw new Error(`Account ID ${ACCOUNT_ID} not found`);
+    }
+
+    log(`✅ 계정 로드 완료: ${account.naver_id}`);
+    log(`   카페: ${account.today_cafe_count}/${account.daily_cafe_limit} (남은 횟수: ${account.cafe_remaining})`);
+    log(`   블로그: ${account.today_blog_count}/${account.daily_blog_limit} (남은 횟수: ${account.blog_remaining})`);
+    return account;
+  }
+
   async function doLogin() {
+    if (!account) {
+      await loadAccount();
+    }
     log('네이버 로그인 중...');
     await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1000);
     await page.click('#id');
-    await page.keyboard.type(NAVER_ID, { delay: 50 });
+    await page.keyboard.type(account.naver_id, { delay: 50 });
     await page.click('#pw');
-    await page.keyboard.type(NAVER_PW, { delay: 50 });
+    await page.keyboard.type(account.naver_pw, { delay: 50 });
     await page.click('#log\\.login');
     await page.waitForTimeout(5000);
     log('로그인 완료\n');
   }
 
   async function checkAndLogin() {
+    // 먼저 계정 로드
+    if (!account) {
+      await loadAccount();
+    }
+
+    const cafeWriteUrl = account.cafe_url || 'https://cafe.naver.com/ca-fe/cafes/31634939/articles/write?boardType=L';
     log('로그인 상태 확인 중...');
-    await page.goto(CAFE_WRITE_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(cafeWriteUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const currentUrl = page.url();
@@ -863,28 +896,18 @@ async function main() {
   try {
     await checkAndLogin();
 
-    // 일일 게시 카운터
-    const DAILY_LIMIT = 200;
-    let dailyCount = 0;
-    let lastResetDate = new Date().toDateString();
-
     while (true) {
-      // 날짜 바뀌면 카운터 리셋
-      const today = new Date().toDateString();
-      if (today !== lastResetDate) {
-        log(`\n🔄 날짜 변경 감지 - 일일 카운터 리셋 (이전: ${dailyCount}개)`);
-        dailyCount = 0;
-        lastResetDate = today;
-      }
+      // 계정 정보 새로고침 (날짜 변경 시 자동 리셋됨)
+      await loadAccount();
 
-      // 일일 한도 체크
-      if (dailyCount >= DAILY_LIMIT) {
+      // 일일 한도 체크 (DB 기반)
+      if (account.cafe_remaining <= 0) {
         const now = new Date();
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(0, 0, 0, 0);
         const waitMs = tomorrow - now;
-        log(`\n⏸️ 일일 한도 도달 (${dailyCount}/${DAILY_LIMIT}개)`);
+        log(`\n⏸️ 일일 한도 도달 (${account.today_cafe_count}/${account.daily_cafe_limit}개)`);
         log(`   내일 00:00까지 ${Math.round(waitMs / 3600000)}시간 대기...`);
         await page.waitForTimeout(waitMs);
         continue;
@@ -896,7 +919,7 @@ async function main() {
         } catch (e) {}
       }
 
-      log(`\n📊 Supabase에서 상품 조회 중... (오늘: ${dailyCount}/${DAILY_LIMIT}개)`);
+      log(`\n📊 Supabase에서 상품 조회 중... (오늘: ${account.today_cafe_count}/${account.daily_cafe_limit}개, 남음: ${account.cafe_remaining}개)`);
       const products = await getProductsForPosting('cafe', 1);
 
       if (!products || products.length === 0) {
@@ -935,8 +958,9 @@ async function main() {
       const success = await writePost(page, product, images, doLogin);
 
       if (success) {
-        dailyCount++;
-        log(`  ✅ 오늘 게시 완료: ${dailyCount}/${DAILY_LIMIT}개`);
+        // DB에 카운트 증가
+        const newCount = await incrementAccountCount(ACCOUNT_ID, 'cafe');
+        log(`  ✅ 오늘 게시 완료: ${newCount}/${account.daily_cafe_limit}개`);
       }
 
       try {

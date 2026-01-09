@@ -494,6 +494,90 @@ export async function upsertProductWithTracking(product) {
   return { product: productData, dailyCount };
 }
 
+// ==================== Naver Accounts (계정 관리) ====================
+
+/**
+ * ID로 계정 조회 (날짜 변경 시 자동 리셋)
+ * @param {number} accountId - 계정 ID (1, 2, 3...)
+ * @returns {Object|null} 계정 정보
+ */
+export async function getAccountById(accountId) {
+  const { data, error } = await supabase
+    .rpc('get_account_by_id', { p_account_id: accountId });
+
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+/**
+ * 계정 게시 카운트 증가
+ * @param {number} accountId - 계정 ID
+ * @param {string} platform - 'cafe' 또는 'blog'
+ * @returns {number} 증가 후 카운트
+ */
+export async function incrementAccountCount(accountId, platform) {
+  const { data, error } = await supabase
+    .rpc('increment_account_count', {
+      p_account_id: accountId,
+      p_platform: platform
+    });
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 새 계정 추가
+ * @param {Object} account - 계정 정보
+ * @returns {Object} 생성된 계정
+ */
+export async function addAccount(account) {
+  const { data, error } = await supabase
+    .from('naver_accounts')
+    .insert({
+      naver_id: account.naverId,
+      naver_pw: account.naverPw,
+      blog_id: account.blogId || account.naverId,
+      cafe_url: account.cafeUrl,
+      daily_cafe_limit: account.dailyCafeLimit || 200,
+      daily_blog_limit: account.dailyBlogLimit || 5,
+      memo: account.memo
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 모든 계정 통계 조회
+ * @returns {Array} 계정 목록 with 통계
+ */
+export async function getAllAccountStats() {
+  const { data, error } = await supabase
+    .from('naver_accounts')
+    .select('id, naver_id, status, today_cafe_count, today_blog_count, daily_cafe_limit, daily_blog_limit, memo, updated_at')
+    .order('id');
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 계정 상태 업데이트
+ * @param {number} accountId - 계정 ID
+ * @param {string} status - 'active' 또는 'suspended'
+ */
+export async function updateAccountStatus(accountId, status) {
+  const { error } = await supabase
+    .from('naver_accounts')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', accountId);
+
+  if (error) throw error;
+}
+
 export default {
   supabase,
   upsertProduct,
@@ -521,5 +605,11 @@ export default {
   incrementDailyIssuance,
   checkDailyLimit,
   completeDailyIssuance,
-  upsertProductWithTracking
+  upsertProductWithTracking,
+  // Naver Accounts
+  getAccountById,
+  incrementAccountCount,
+  addAccount,
+  getAllAccountStats,
+  updateAccountStatus
 };
