@@ -156,213 +156,167 @@ async function phase1_issueLinks(page, existingIds, remainingQuota) {
         continue;
       }
 
-      // 초기 스크롤해서 모든 상품 로드 (무한 스크롤 대응)
-      log(`  📜 ${category}: 상품 로딩 중...`);
-      let prevProductCount = 0;
-      let sameCountTimes = 0;
+      // 스크롤하면서 바로 발급 (스크롤 + 발급 동시 진행)
+      log(`  📜 ${category}: 스크롤하며 발급 시작...`);
 
-      // 끝까지 스크롤 (상품 개수가 늘어나지 않을 때까지)
-      for (let i = 0; i < 100; i++) {
-        // Page Down 효과 - 여러 번 스크롤
-        for (let j = 0; j < 3; j++) {
-          await page.keyboard.press('End');
-          await page.waitForTimeout(300);
-        }
-        await page.waitForTimeout(700); // 로딩 대기
-
-        // 현재 상품 개수 확인
-        const currentProductCount = await page.evaluate(() =>
-          document.querySelectorAll('[class*="ProductItem_root"]').length
-        );
-
-        if (currentProductCount === prevProductCount) {
-          sameCountTimes++;
-          if (sameCountTimes >= 5) {
-            log(`  📜 ${category}: 스크롤 완료 (${i + 1}회, ${currentProductCount}개 로드)`);
-            break;
-          }
-        } else {
-          sameCountTimes = 0;
-          if (i % 10 === 0) {
-            log(`  📜 ${category}: ${currentProductCount}개 로드됨...`);
-          }
-        }
-        prevProductCount = currentProductCount;
-      }
-
-      // 상품 개수 확인
-      const productCount = await page.evaluate(() =>
-        document.querySelectorAll('[class*="ProductItem_root"]').length
-      );
-      const issueCount = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('button')).filter(b => b.textContent?.trim() === '링크 발급').length
-      );
-      log(`  📦 ${category}: 총 ${productCount}개 상품, ${issueCount}개 발급 가능`);
-
-      // 맨 위로 스크롤
+      // 맨 위로
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(500);
 
-      // 카테고리 내 처리
       let issuedInCategory = 0;
-      let scrollPosition = 0;
-      let noNewButtonCount = 0;
+      let noButtonScrollCount = 0;
+      let lastProductCount = 0;
 
       while (issuedInCategory < ITEMS_PER_CATEGORY_PER_ROUND && totalIssued < remainingQuota) {
         // 현재 화면에서 링크 발급 버튼 찾기
         let issueButtons = await page.$$('button:has-text("링크 발급")');
 
-        // 버튼이 없으면 스크롤해서 더 찾기
-        if (issueButtons.length === 0) {
-          noNewButtonCount++;
-          if (noNewButtonCount < 10) {
-            // 아래로 스크롤하며 버튼 찾기
-            scrollPosition += 600;
-            await page.evaluate((pos) => window.scrollTo(0, pos), scrollPosition);
-            await page.waitForTimeout(400);
+        if (issueButtons.length > 0) {
+          // 버튼 찾음 - 바로 발급!
+          noButtonScrollCount = 0;
+          allCategoriesEmpty = false;
+          const btn = issueButtons[0];
 
-            // 다시 버튼 찾기
-            issueButtons = await page.$$('button:has-text("링크 발급")');
-            if (issueButtons.length > 0) {
-              noNewButtonCount = 0;
+          try {
+            await btn.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(200);
+
+            // productId 및 상품 정보 추출
+            let productId = null;
+            let productName = '';
+            let productUrl = '';
+            let store = '';
+            let price = '';
+            let originalPrice = '';
+            let commission = '';
+
+            try {
+              const listItem = await btn.evaluateHandle(el =>
+                el.closest('li') || el.closest('[class*="item"]') || el.closest('tr')
+              );
+              const productLink = await listItem.$('a[href*="/products/"]');
+
+              if (productLink) {
+                const href = await productLink.getAttribute('href');
+                const match = href.match(/products\/(\d+)/);
+                if (match) {
+                  productId = match[1];
+                  productUrl = href.startsWith('http') ? href : `https://brandconnect.naver.com${href}`;
+                }
+
+                // 상품명 추출 (ProductItem_title 클래스 내의 텍스트)
+                const titleEl = await listItem.$('[class*="ProductItem_title"] [class*="ProductItem_ell"]');
+                if (titleEl) {
+                  productName = await titleEl.evaluate(el => el.textContent?.trim() || '');
+                }
+
+                // 수수료 추출
+                const commissionEl = await listItem.$('[class*="ProductItem_commission__"]');
+                if (commissionEl) {
+                  commission = await commissionEl.evaluate(el => el.textContent?.trim().replace('수수료 ', '') || '');
+                }
+
+                // 할인가 추출 (ProductItem_price__ 내의 strong 중 할인율이 아닌 것)
+                const priceEl = await listItem.$('ins[class*="ProductItem_price__"] strong:not([class*="discount"])');
+                if (priceEl) {
+                  price = await priceEl.evaluate(el => {
+                    const text = el.textContent?.trim() || '';
+                    return text.includes('원') ? text : text + '원';
+                  });
+                }
+
+                // 원가 추출
+                const originalPriceEl = await listItem.$('del[class*="ProductItem_price_original"]');
+                if (originalPriceEl) {
+                  originalPrice = await originalPriceEl.evaluate(el => {
+                    const text = el.textContent || '';
+                    const match = text.match(/[\d,]+원/);
+                    return match ? match[0] : '';
+                  });
+                }
+
+                // 스토어명 추출
+                const storeEl = await listItem.$('[class*="ProductItem_brand_name"] [class*="ProductItem_ell"]');
+                if (storeEl) {
+                  store = await storeEl.evaluate(el => el.textContent?.trim() || '');
+                }
+              }
+            } catch (e) {}
+
+            // 발급 버튼 클릭
+            await btn.click();
+            await page.waitForTimeout(500);
+
+            const confirmBtn = await page.$('button:has-text("확인")');
+            if (confirmBtn) {
+              await confirmBtn.click();
+              await page.waitForTimeout(300);
             }
+
+            if (!productId) {
+              issuedInCategory++;
+              continue;
+            }
+
+            // 이미 DB에 있는지 확인
+            if (existingIds.has(productId)) {
+              categoryStats[category].skipped++;
+              issuedInCategory++;
+              continue;
+            }
+
+            // DB 저장 (naver_shopping_url은 나중에)
+            const product = {
+              productId,
+              name: productName,
+              store,
+              price,
+              originalPrice,
+              commission,
+              status: 'ON',
+              productUrl,
+              affiliateLink: '',
+              naverShoppingUrl: null
+            };
+
+            await upsertProduct(product);
+            await incrementDailyIssuance(1);
+            existingIds.add(productId);
+
+            issuedProducts.push({ productId, productUrl, name: productName });
+            totalIssued++;
+            issuedInCategory++;
+            issuedThisRound++;
+            categoryStats[category].issued++;
+
+            log(`  ✅ [${totalIssued}/${remainingQuota}] ${category}: ${productName.substring(0, 25)}...`);
+
+            await page.waitForTimeout(DELAY_BETWEEN_ITEMS);
+
+          } catch (e) {
+            log(`  ⚠️ ${category}: 처리 오류 - ${e.message}`);
+            break;
           }
+        } else {
+          // 버튼 없음 - 스크롤해서 더 로드
+          noButtonScrollCount++;
 
-          if (issueButtons.length === 0 && noNewButtonCount >= 10) {
-            if (issuedInCategory === 0) {
-              categoryStats[category].empty = true;
-              log(`  📂 ${category}: 발급할 상품 없음 (모두 발급됨)`);
-            } else {
-              log(`  ✅ ${category}: ${issuedInCategory}개 발급 완료 (더 이상 없음)`);
-            }
+          // 현재 상품 개수 체크
+          const currentProducts = await page.$$('[class*="ProductItem"]');
+          const currentCount = currentProducts.length;
+
+          if (currentCount === lastProductCount && noButtonScrollCount > 5) {
+            // 여러 번 스크롤해도 새 상품 안 나옴 - 이 카테고리 끝
+            log(`  ℹ️ ${category}: 더 이상 발급할 상품 없음`);
+            categoryStats[category].empty = true;
             break;
           }
 
-          if (issueButtons.length === 0) continue;
-        }
+          lastProductCount = currentCount;
 
-        allCategoriesEmpty = false;
-        const btn = issueButtons[0];
-
-        try {
-          await btn.scrollIntoViewIfNeeded();
-          await page.waitForTimeout(200);
-
-          // productId 및 상품 정보 추출
-          let productId = null;
-          let productName = '';
-          let productUrl = '';
-          let store = '';
-          let price = '';
-          let originalPrice = '';
-          let commission = '';
-
-          try {
-            const listItem = await btn.evaluateHandle(el =>
-              el.closest('li') || el.closest('[class*="item"]') || el.closest('tr')
-            );
-            const productLink = await listItem.$('a[href*="/products/"]');
-
-            if (productLink) {
-              const href = await productLink.getAttribute('href');
-              const match = href.match(/products\/(\d+)/);
-              if (match) {
-                productId = match[1];
-                productUrl = href.startsWith('http') ? href : `https://brandconnect.naver.com${href}`;
-              }
-
-              // 상품명 추출 (ProductItem_title 클래스 내의 텍스트)
-              const titleEl = await listItem.$('[class*="ProductItem_title"] [class*="ProductItem_ell"]');
-              if (titleEl) {
-                productName = await titleEl.evaluate(el => el.textContent?.trim() || '');
-              }
-
-              // 수수료 추출
-              const commissionEl = await listItem.$('[class*="ProductItem_commission__"]');
-              if (commissionEl) {
-                commission = await commissionEl.evaluate(el => el.textContent?.trim().replace('수수료 ', '') || '');
-              }
-
-              // 할인가 추출 (ProductItem_price__ 내의 strong 중 할인율이 아닌 것)
-              const priceEl = await listItem.$('ins[class*="ProductItem_price__"] strong:not([class*="discount"])');
-              if (priceEl) {
-                price = await priceEl.evaluate(el => {
-                  const text = el.textContent?.trim() || '';
-                  return text.includes('원') ? text : text + '원';
-                });
-              }
-
-              // 원가 추출
-              const originalPriceEl = await listItem.$('del[class*="ProductItem_price_original"]');
-              if (originalPriceEl) {
-                originalPrice = await originalPriceEl.evaluate(el => {
-                  const text = el.textContent || '';
-                  const match = text.match(/[\d,]+원/);
-                  return match ? match[0] : '';
-                });
-              }
-
-              // 스토어명 추출
-              const storeEl = await listItem.$('[class*="ProductItem_brand_name"] [class*="ProductItem_ell"]');
-              if (storeEl) {
-                store = await storeEl.evaluate(el => el.textContent?.trim() || '');
-              }
-            }
-          } catch (e) {}
-
-          // 발급 버튼 클릭
-          await btn.click();
-          await page.waitForTimeout(500);
-
-          const confirmBtn = await page.$('button:has-text("확인")');
-          if (confirmBtn) {
-            await confirmBtn.click();
-            await page.waitForTimeout(300);
-          }
-
-          if (!productId) {
-            issuedInCategory++;
-            continue;
-          }
-
-          // 이미 DB에 있는지 확인
-          if (existingIds.has(productId)) {
-            categoryStats[category].skipped++;
-            issuedInCategory++;
-            continue;
-          }
-
-          // DB 저장 (naver_shopping_url은 나중에)
-          const product = {
-            productId,
-            name: productName,
-            store,
-            price,
-            originalPrice,
-            commission,
-            status: 'ON',
-            productUrl,
-            affiliateLink: '',
-            naverShoppingUrl: null
-          };
-
-          await upsertProduct(product);
-          await incrementDailyIssuance(1);
-          existingIds.add(productId);
-
-          issuedProducts.push({ productId, productUrl, name: productName });
-          totalIssued++;
-          issuedInCategory++;
-          issuedThisRound++;
-          categoryStats[category].issued++;
-
-          log(`  ✅ [${totalIssued}/${remainingQuota}] ${category}: ${productName.substring(0, 25)}...`);
-
-          await page.waitForTimeout(DELAY_BETWEEN_ITEMS);
-
-        } catch (e) {
-          log(`  ⚠️ ${category}: 처리 오류 - ${e.message}`);
-          break;
+          // 스크롤 다운
+          await page.keyboard.press('PageDown');
+          await page.waitForTimeout(800);
         }
       }
     }
