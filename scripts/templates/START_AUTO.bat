@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+set PATH=%~dp0node;%PATH%
 
 echo ========================================
 echo   자동 글쓰기 통합 스크립트
@@ -31,5 +33,5 @@ echo.
 echo   Ctrl+C로 중지
 echo ========================================
 echo.
-call node\node.exe src/writers/auto_writer.js
+node src/writers/auto_writer.js
 pause
