@@ -158,19 +158,36 @@ async function phase1_issueLinks(page, existingIds, remainingQuota) {
 
       // 초기 스크롤해서 모든 상품 로드 (무한 스크롤 대응)
       log(`  📜 ${category}: 상품 로딩 중...`);
-      let prevHeight = 0;
-      let sameHeightCount = 0;
-      for (let i = 0; i < 50; i++) {
-        await page.evaluate(() => window.scrollBy(0, 1000));
-        await page.waitForTimeout(500); // 더 긴 대기 시간
-        const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-        if (currentHeight === prevHeight) {
-          sameHeightCount++;
-          if (sameHeightCount >= 3) break; // 3번 연속 같으면 끝
-        } else {
-          sameHeightCount = 0;
+      let prevProductCount = 0;
+      let sameCountTimes = 0;
+
+      // 끝까지 스크롤 (상품 개수가 늘어나지 않을 때까지)
+      for (let i = 0; i < 100; i++) {
+        // Page Down 효과 - 여러 번 스크롤
+        for (let j = 0; j < 3; j++) {
+          await page.keyboard.press('End');
+          await page.waitForTimeout(300);
         }
-        prevHeight = currentHeight;
+        await page.waitForTimeout(700); // 로딩 대기
+
+        // 현재 상품 개수 확인
+        const currentProductCount = await page.evaluate(() =>
+          document.querySelectorAll('[class*="ProductItem_root"]').length
+        );
+
+        if (currentProductCount === prevProductCount) {
+          sameCountTimes++;
+          if (sameCountTimes >= 5) {
+            log(`  📜 ${category}: 스크롤 완료 (${i + 1}회, ${currentProductCount}개 로드)`);
+            break;
+          }
+        } else {
+          sameCountTimes = 0;
+          if (i % 10 === 0) {
+            log(`  📜 ${category}: ${currentProductCount}개 로드됨...`);
+          }
+        }
+        prevProductCount = currentProductCount;
       }
 
       // 상품 개수 확인
