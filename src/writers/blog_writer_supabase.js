@@ -772,6 +772,26 @@ async function writePost(page, product, images, doLoginFn) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
 
+    // 도움말 패널이 열려있으면 닫기 (발행 버튼을 가림)
+    try {
+      const helpCloseBtn = await mainFrame.$('button.se-help-panel-close-button, div[class*="container__"] button[class*="close"]');
+      if (helpCloseBtn) {
+        await helpCloseBtn.click();
+        log('  도움말 패널 닫기');
+        await page.waitForTimeout(500);
+      }
+      // 도움말 패널이 있는지 확인하고 Escape로 닫기 시도
+      const helpPanel = await mainFrame.$('h1.se-help-title, div[class*="container__"]');
+      if (helpPanel) {
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+      }
+    } catch (e) {
+      // 무시
+    }
+
     // 발행 버튼 찾기 (안정적인 data-click-area 속성 사용)
     const publishBtn = await mainFrame.$('button[data-click-area="tpb.publish"]');
     if (publishBtn) {
