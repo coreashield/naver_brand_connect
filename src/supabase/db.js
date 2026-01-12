@@ -578,6 +578,38 @@ export async function updateAccountStatus(accountId, status) {
   if (error) throw error;
 }
 
+/**
+ * 계정의 오늘 카운트를 일일 한도로 설정 (한도 도달 처리)
+ * @param {number} accountId - 계정 ID
+ * @param {string} platform - 'cafe' 또는 'blog'
+ */
+export async function setAccountCountToLimit(accountId, platform) {
+  const countField = platform === 'cafe' ? 'today_cafe_count' : 'today_blog_count';
+  const limitField = platform === 'cafe' ? 'daily_cafe_limit' : 'daily_blog_limit';
+
+  // 먼저 limit 값 조회
+  const { data: account, error: fetchError } = await supabase
+    .from('naver_accounts')
+    .select(`${limitField}`)
+    .eq('id', accountId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  // count를 limit으로 설정
+  const { error: updateError } = await supabase
+    .from('naver_accounts')
+    .update({
+      [countField]: account[limitField],
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', accountId);
+
+  if (updateError) throw updateError;
+
+  return account[limitField];
+}
+
 export default {
   supabase,
   upsertProduct,
@@ -609,6 +641,7 @@ export default {
   // Naver Accounts
   getAccountById,
   incrementAccountCount,
+  setAccountCountToLimit,
   addAccount,
   getAllAccountStats,
   updateAccountStatus

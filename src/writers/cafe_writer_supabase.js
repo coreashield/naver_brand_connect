@@ -18,7 +18,8 @@ import {
   updateWorkerHeartbeat,
   testConnection,
   getAccountById,
-  incrementAccountCount
+  incrementAccountCount,
+  setAccountCountToLimit
 } from '../supabase/db.js';
 
 dotenv.config();
@@ -779,7 +780,8 @@ async function writePost(page, product, images, doLoginFn) {
     }
 
     if (!registered) {
-      log(`  ⚠️ 등록 버튼 못찾음 - 수동 등록 필요`);
+      log(`  ⚠️ 등록 버튼 못찾음 - 일일 한도 도달로 처리`);
+      return 'limit_reached';  // 특별 상태: 한도 도달 처리 필요
     }
 
     return registered;
@@ -955,7 +957,26 @@ async function main() {
         continue;
       }
 
-      const success = await writePost(page, product, images, doLogin);
+      const result = await writePost(page, product, images, doLogin);
+
+      // 등록 버튼 못찾음 = 일일 한도 도달로 처리
+      if (result === 'limit_reached') {
+        log(`\n🛑 등록 버튼 못찾음 - 일일 한도 도달로 처리합니다.`);
+        try {
+          const limitCount = await setAccountCountToLimit(ACCOUNT_ID, 'cafe');
+          log(`   카페 카운트를 ${limitCount}/${limitCount}로 설정 완료`);
+          log(`   블로그 작업으로 전환하려면 blog_writer_supabase.js를 실행하세요.`);
+        } catch (e) {
+          log(`   ⚠️ 카운트 업데이트 실패: ${e.message}`);
+        }
+        // 이미지 정리 후 종료
+        for (const img of images) {
+          try { fs.unlinkSync(img); } catch (e) {}
+        }
+        break;  // while 루프 종료
+      }
+
+      const success = result === true;
 
       if (success) {
         // DB에 카운트 증가
