@@ -772,20 +772,43 @@ async function writePost(page, product, images, doLoginFn) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
 
-    // 발행 버튼 찾기
-    const publishBtn = await mainFrame.$('button.publish_btn__Y5YlZ, button[class*="publish"]');
+    // 발행 버튼 찾기 (안정적인 data-click-area 속성 사용)
+    const publishBtn = await mainFrame.$('button[data-click-area="tpb.publish"]');
     if (publishBtn) {
       await publishBtn.click();
-      log('  발행 버튼 클릭');
+      log('  발행 버튼 클릭 (설정 레이어 열기)');
       await page.waitForTimeout(2000);
+
+      // 레이어가 열렸는지 확인
+      const layerOpened = await mainFrame.$('div[class*="layer_popup"][class*="is_show"]');
+      if (!layerOpened) {
+        log('  ⚠️ 발행 레이어가 열리지 않음 - 재시도...');
+        await publishBtn.click();
+        await page.waitForTimeout(2000);
+      }
+    } else {
+      log('  ⚠️ 발행 버튼을 찾을 수 없음 - 클래스명으로 재시도...');
+      const fallbackBtn = await mainFrame.$('button[class*="publish_btn"]');
+      if (fallbackBtn) {
+        await fallbackBtn.click();
+        await page.waitForTimeout(2000);
+      }
     }
 
-    // 해시태그 입력
+    // 해시태그 입력 (안정적인 ID 셀렉터 사용)
     try {
       const tagList = generateHashtags(product.name, product.category || '');
       log(`  해시태그 ${tagList.length}개 입력 중...`);
 
-      const hashtagInput = await mainFrame.$('input[placeholder*="태그"], input[placeholder*="해시태그"]');
+      // 우선순위: ID > placeholder > 클래스
+      let hashtagInput = await mainFrame.$('#tag-input');
+      if (!hashtagInput) {
+        hashtagInput = await mainFrame.$('input[placeholder*="태그"]');
+      }
+      if (!hashtagInput) {
+        hashtagInput = await mainFrame.$('input[class*="tag_input"]');
+      }
+
       if (hashtagInput) {
         for (const tag of tagList) {
           await hashtagInput.click();
@@ -795,6 +818,8 @@ async function writePost(page, product, images, doLoginFn) {
           await page.waitForTimeout(200);
         }
         log(`  ✅ 해시태그 입력 완료: ${tagList.length}개`);
+      } else {
+        log(`  ⚠️ 해시태그 입력 필드를 찾을 수 없음`);
       }
     } catch (e) {
       log(`  해시태그 입력 실패: ${e.message}`);
