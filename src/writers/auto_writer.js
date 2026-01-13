@@ -1,6 +1,6 @@
 /**
  * 자동 글쓰기 통합 스크립트
- * 카페 200개 → 블로그 5개 (2시간 간격) → 00시 대기 → 반복
+ * 카페 200개 → 블로그 5개 (1~1.3시간 간격) → 00시 대기 → 반복
  */
 
 import { chromium } from 'playwright';
@@ -18,7 +18,8 @@ import {
   updateWorkerHeartbeat,
   testConnection,
   getAccountById,
-  incrementAccountCount
+  incrementAccountCount,
+  setAccountCountToLimit
 } from '../supabase/db.js';
 
 dotenv.config();
@@ -526,7 +527,8 @@ async function writeCafePost(page, product, images, doLoginFn) {
     }
 
     if (!registered) {
-      log(`  ⚠️ 등록 버튼 못찾음 - URL: ${page.url()}`);
+      log(`  ⚠️ 등록 버튼 못찾음 - 일일 한도 도달로 처리`);
+      return 'limit_reached';
     }
 
     return registered;
@@ -743,7 +745,7 @@ async function writeBlogPost(page, product, images, doLoginFn) {
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
   console.log('║   자동 글쓰기 통합 스크립트                    ║');
-  console.log('║   카페 200개 → 블로그 5개 (2시간) → 반복       ║');
+  console.log('║   카페 200개 → 블로그 5개 (1~1.3시간) → 반복    ║');
   console.log('║   Ctrl+C로 종료                                ║');
   console.log('╚════════════════════════════════════════════════╝\n');
 
@@ -841,12 +843,28 @@ async function main() {
 
         const success = await writeCafePost(page, product, images, doLogin);
 
-        if (success) {
+        // 등록 버튼 못찾음 = 일일 한도 도달로 처리 → 블로그 모드로 전환
+        if (success === 'limit_reached') {
+          log(`\n🛑 카페 일일 한도 도달 - 블로그 모드로 전환합니다.`);
+          try {
+            const limitCount = await setAccountCountToLimit(ACCOUNT_ID, 'cafe');
+            log(`   카페 카운트를 ${limitCount}/${limitCount}로 설정 완료`);
+          } catch (e) {
+            log(`   ⚠️ 카운트 업데이트 실패: ${e.message}`);
+          }
+          // 이미지 정리 후 블로그 모드로 진입 (continue)
+          for (const img of images) {
+            try { fs.unlinkSync(img); } catch (e) {}
+          }
+          continue;
+        }
+
+        if (success === true) {
           const newCount = await incrementAccountCount(ACCOUNT_ID, 'cafe');
           log(`✅ 카페 ${newCount}/${account.daily_cafe_limit}개 완료`);
         }
 
-        await recordPost(product.product_id, worker?.id, 'cafe', success, success ? null : 'Failed');
+        await recordPost(product.product_id, worker?.id, 'cafe', success === true, success === true ? null : 'Failed');
 
         // 이미지 정리
         for (const img of images) {
@@ -893,11 +911,12 @@ async function main() {
           try { fs.unlinkSync(img); } catch (e) {}
         }
 
-        // 2시간 대기 (마지막 블로그 제외)
+        // 1시간~1시간20분 대기 (마지막 블로그 제외)
         await loadAccount();
         if (account.blog_remaining > 0) {
-          log(`다음 블로그까지 2시간 대기...`);
-          await page.waitForTimeout(2 * 60 * 60 * 1000);
+          const blogWaitTime = 60 * 60 * 1000 + Math.random() * 20 * 60 * 1000;
+          log(`다음 블로그까지 ${Math.round(blogWaitTime / 60000)}분 대기...`);
+          await page.waitForTimeout(blogWaitTime);
         }
       }
       // 3. 둘 다 끝나면 00시까지 대기
