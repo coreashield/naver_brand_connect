@@ -696,6 +696,16 @@ async function writeBlogPost(page, product, images, doLoginFn) {
       await page.waitForTimeout(5000);
     }
 
+    // 도움말 패널 닫기 (발행 버튼을 가릴 수 있음)
+    try {
+      const helpCloseBtn = await mainFrame.$('button.se-help-panel-close-button');
+      if (helpCloseBtn) {
+        await helpCloseBtn.click();
+        log(`  도움말 패널 닫기`);
+        await page.waitForTimeout(500);
+      }
+    } catch (e) {}
+
     // 발행
     await page.keyboard.press('Escape');
     const publishBtn = await mainFrame.$('button.publish_btn__Y5YlZ, button[class*="publish"]');
