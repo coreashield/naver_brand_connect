@@ -871,6 +871,13 @@ async function main() {
           try { fs.unlinkSync(img); } catch (e) {}
         }
 
+        // DB 카운트 변경 확인 (외부에서 한도 설정했을 수 있음)
+        await loadAccount();
+        if (account.cafe_remaining <= 0) {
+          log(`\n🔄 DB에서 카페 한도 도달 감지 - 블로그 모드로 전환합니다.`);
+          continue;
+        }
+
         // 2~3분 대기
         const waitTime = 2 * 60 * 1000 + Math.random() * 60 * 1000;
         log(`다음 글까지 ${Math.round(waitTime / 60000)}분 대기...`);
