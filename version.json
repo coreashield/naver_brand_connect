@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "updated_at": "2025-01-14",
   "changes": [
-    "GitHub Actions 워크플로우 YAML 문법 오류 수정",
-    "PowerShell here-string 호환성 개선"
+    "INSTALL.bat ZIP 추출 버그 수정",
+    "전체 파일 정상 설치되도록 개선"
   ]
 }

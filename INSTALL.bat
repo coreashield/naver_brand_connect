@@ -1,100 +1,66 @@
 @echo off
-chcp 65001 >nul
-setlocal EnableDelayedExpansion
-title Shopping Connect 설치/업데이트
-
-echo.
-echo ╔════════════════════════════════════════════════╗
-echo ║   Shopping Connect 설치/업데이트 프로그램     ║
-echo ╚════════════════════════════════════════════════╝
-echo.
-
 cd /d "%~dp0"
-
-:: 현재 버전 확인
-if exist "version.json" (
-    for /f "tokens=2 delims=:," %%a in ('findstr "version" version.json') do (
-        set "CURRENT_VERSION=%%~a"
-        set "CURRENT_VERSION=!CURRENT_VERSION: =!"
-        set "CURRENT_VERSION=!CURRENT_VERSION:"=!"
-    )
-    echo 현재 버전: v!CURRENT_VERSION!
-) else (
-    set "CURRENT_VERSION=0.0.0"
-    echo 현재 버전: 설치되지 않음
-)
-
-echo.
-echo GitHub에서 최신 버전 확인 중...
+echo Shopping Connect Installer
 echo.
 
-:: PowerShell로 GitHub API 호출 및 다운로드
-powershell -ExecutionPolicy Bypass -Command ^
-"$ErrorActionPreference = 'Stop'; ^
-try { ^
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ^
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/coreashield/naver_brand_connect/releases/latest' -Headers @{'User-Agent'='ShoppingConnect'}; ^
-    $remoteVersion = $release.tag_name -replace 'v',''; ^
-    $currentVersion = '%CURRENT_VERSION%'; ^
-    Write-Host \"최신 버전: v$remoteVersion\"; ^
-    Write-Host ''; ^
-    if ($currentVersion -ne '0.0.0' -and [version]$currentVersion -ge [version]$remoteVersion) { ^
-        Write-Host '이미 최신 버전입니다!' -ForegroundColor Green; ^
-        exit 0; ^
-    } ^
-    if ($currentVersion -eq '0.0.0') { ^
-        Write-Host \"설치할 버전: v$remoteVersion\" -ForegroundColor Yellow; ^
-    } else { ^
-        Write-Host \"업데이트: v$currentVersion → v$remoteVersion\" -ForegroundColor Yellow; ^
-    } ^
-    $asset = $release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1; ^
-    if (-not $asset) { Write-Host 'ERROR: 다운로드 파일 없음' -ForegroundColor Red; exit 1; } ^
-    $sizeMB = [math]::Round($asset.size / 1MB, 1); ^
-    Write-Host \"다운로드: $($asset.name) ($sizeMB MB)\"; ^
-    Write-Host ''; ^
-    Write-Host '다운로드 중... (약 3-5분 소요)' -ForegroundColor Cyan; ^
-    $ProgressPreference = 'SilentlyContinue'; ^
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile 'update.zip' -UseBasicParsing; ^
-    Write-Host '다운로드 완료!' -ForegroundColor Green; ^
-    Write-Host ''; ^
-    Write-Host '압축 해제 중...' -ForegroundColor Cyan; ^
-    if (Test-Path 'update_temp') { Remove-Item 'update_temp' -Recurse -Force; } ^
-    Expand-Archive -Path 'update.zip' -DestinationPath 'update_temp' -Force; ^
-    $extracted = Get-ChildItem 'update_temp' | Select-Object -First 1; ^
-    $sourceDir = if ($extracted.PSIsContainer) { $extracted.FullName } else { 'update_temp' }; ^
-    $preserve = @('.env', 'output', 'playwright-data'); ^
-    Get-ChildItem $sourceDir | ForEach-Object { ^
-        $itemName = $_.Name; ^
-        if ($preserve -contains $itemName -and (Test-Path (Join-Path (Get-Location) $itemName))) { ^
-            Write-Host \"  건너뜀: $itemName (설정 보존)\"; ^
-        } else { ^
-            $dest = Join-Path (Get-Location) $itemName; ^
-            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue; } ^
-            Copy-Item $_.FullName $dest -Recurse -Force; ^
-            Write-Host \"  OK $itemName\" -ForegroundColor Green; ^
-        } ^
-    }; ^
-    Remove-Item 'update_temp' -Recurse -Force; ^
-    Remove-Item 'update.zip' -Force; ^
-    Write-Host ''; ^
-    Write-Host \"설치 완료! v$remoteVersion\" -ForegroundColor Green; ^
-    Write-Host ''; ^
-    if (-not (Test-Path '.env')) { ^
-        if (Test-Path '.env.example') { ^
-            Copy-Item '.env.example' '.env'; ^
-            Write-Host '.env 파일이 생성되었습니다. 편집하세요!' -ForegroundColor Yellow; ^
-        } ^
-    } ^
-} catch { ^
-    Write-Host \"ERROR: $_\" -ForegroundColor Red; ^
-    exit 1; ^
-}"
+:: Create temp PowerShell script
+echo $ErrorActionPreference = 'Stop' > "%temp%\sc_install.ps1"
+echo [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 >> "%temp%\sc_install.ps1"
+echo Write-Host 'Checking GitHub...' >> "%temp%\sc_install.ps1"
+echo try { >> "%temp%\sc_install.ps1"
+echo     $r = Invoke-RestMethod -Uri 'https://api.github.com/repos/coreashield/naver_brand_connect/releases/latest' -Headers @{'User-Agent'='SC'} >> "%temp%\sc_install.ps1"
+echo     $rv = $r.tag_name -replace 'v','' >> "%temp%\sc_install.ps1"
+echo     Write-Host "Latest version: $rv" >> "%temp%\sc_install.ps1"
+echo     $currentVersion = '0.0.0' >> "%temp%\sc_install.ps1"
+echo     if (Test-Path 'version.json') { >> "%temp%\sc_install.ps1"
+echo         $v = Get-Content 'version.json' -Raw ^| ConvertFrom-Json >> "%temp%\sc_install.ps1"
+echo         $currentVersion = $v.version >> "%temp%\sc_install.ps1"
+echo     } >> "%temp%\sc_install.ps1"
+echo     Write-Host "Current version: $currentVersion" >> "%temp%\sc_install.ps1"
+echo     if ($currentVersion -ne '0.0.0' -and [version]$currentVersion -ge [version]$rv) { >> "%temp%\sc_install.ps1"
+echo         Write-Host 'Already up to date!' -ForegroundColor Green >> "%temp%\sc_install.ps1"
+echo     } else { >> "%temp%\sc_install.ps1"
+echo         $a = $r.assets ^| Where-Object { $_.name -like '*.zip' } ^| Select-Object -First 1 >> "%temp%\sc_install.ps1"
+echo         Write-Host "Downloading $($a.name)..." >> "%temp%\sc_install.ps1"
+echo         $ProgressPreference = 'SilentlyContinue' >> "%temp%\sc_install.ps1"
+echo         Invoke-WebRequest -Uri $a.browser_download_url -OutFile 'update.zip' -UseBasicParsing >> "%temp%\sc_install.ps1"
+echo         Write-Host 'Download complete!' -ForegroundColor Green >> "%temp%\sc_install.ps1"
+echo         Write-Host 'Extracting...' >> "%temp%\sc_install.ps1"
+echo         if (Test-Path 'update_temp') { Remove-Item 'update_temp' -Recurse -Force } >> "%temp%\sc_install.ps1"
+echo         Expand-Archive -Path 'update.zip' -DestinationPath 'update_temp' -Force >> "%temp%\sc_install.ps1"
+echo         $items = Get-ChildItem 'update_temp' >> "%temp%\sc_install.ps1"
+echo         if ($items.Count -eq 1 -and $items[0].PSIsContainer) { >> "%temp%\sc_install.ps1"
+echo             $src = $items[0].FullName >> "%temp%\sc_install.ps1"
+echo         } else { >> "%temp%\sc_install.ps1"
+echo             $src = 'update_temp' >> "%temp%\sc_install.ps1"
+echo         } >> "%temp%\sc_install.ps1"
+echo         Get-ChildItem $src ^| ForEach-Object { >> "%temp%\sc_install.ps1"
+echo             $dest = $_.Name >> "%temp%\sc_install.ps1"
+echo             if ($dest -eq '.env' -and (Test-Path '.env')) { Write-Host "  Skip: .env"; return } >> "%temp%\sc_install.ps1"
+echo             if ($dest -eq 'output' -and (Test-Path 'output')) { Write-Host "  Skip: output"; return } >> "%temp%\sc_install.ps1"
+echo             if ($dest -eq 'playwright-data' -and (Test-Path 'playwright-data')) { Write-Host "  Skip: playwright-data"; return } >> "%temp%\sc_install.ps1"
+echo             if (Test-Path $dest) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue } >> "%temp%\sc_install.ps1"
+echo             Copy-Item $_.FullName $dest -Recurse -Force >> "%temp%\sc_install.ps1"
+echo             Write-Host "  OK: $dest" -ForegroundColor Green >> "%temp%\sc_install.ps1"
+echo         } >> "%temp%\sc_install.ps1"
+echo         Remove-Item 'update_temp' -Recurse -Force >> "%temp%\sc_install.ps1"
+echo         Remove-Item 'update.zip' -Force >> "%temp%\sc_install.ps1"
+echo         Write-Host '' >> "%temp%\sc_install.ps1"
+echo         Write-Host "Installation complete! v$rv" -ForegroundColor Green >> "%temp%\sc_install.ps1"
+echo         if (-not (Test-Path '.env') -and (Test-Path '.env.example')) { >> "%temp%\sc_install.ps1"
+echo             Copy-Item '.env.example' '.env' >> "%temp%\sc_install.ps1"
+echo             Write-Host '.env created - please edit!' -ForegroundColor Yellow >> "%temp%\sc_install.ps1"
+echo         } >> "%temp%\sc_install.ps1"
+echo     } >> "%temp%\sc_install.ps1"
+echo } catch { >> "%temp%\sc_install.ps1"
+echo     Write-Host "ERROR: $_" -ForegroundColor Red >> "%temp%\sc_install.ps1"
+echo } >> "%temp%\sc_install.ps1"
 
-echo.
-echo ════════════════════════════════════════════════
-echo  완료! 다음 단계:
-echo  1. .env 파일 편집 (계정정보 입력)
-echo  2. START_CAFE.bat 또는 START_BLOG.bat 실행
-echo ════════════════════════════════════════════════
+:: Run the script
+powershell -ExecutionPolicy Bypass -File "%temp%\sc_install.ps1"
+
+:: Cleanup
+del "%temp%\sc_install.ps1" 2>nul
+
 echo.
 pause
