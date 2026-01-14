@@ -66,7 +66,7 @@ jobs:
       - name: Copy source files
         shell: pwsh
         run: |
-          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat")
+          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat")
           foreach ($item in $include) {
             if (Test-Path $item) {
               if ((Get-Item $item).PSIsContainer) {
@@ -91,6 +91,8 @@ jobs:
           $blog | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
           $sync = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode full_sync_supabase.js`npause"
           $sync | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
+          $auto = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/auto_writer.js`npause"
+          $auto | Out-File -FilePath "package/START_AUTO.bat" -Encoding ASCII
           $update = "@echo off`nchcp 65001 >nul`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nnode update_script.js`npause"
           $update | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
 

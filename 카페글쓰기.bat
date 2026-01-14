@@ -1,6 +1,8 @@
 @echo off
-chcp 65001 > nul
+chcp 65001 >nul
 cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 echo 카페 자동 글쓰기 시작...
-node src/writers/cafe_writer.js
+node src/writers/cafe_writer_supabase.js
 pause

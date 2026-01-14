@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 
 echo ========================================
 echo   블로그 자동 글쓰기
