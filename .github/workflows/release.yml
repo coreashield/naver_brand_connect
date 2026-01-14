@@ -8,6 +8,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -66,7 +69,9 @@ jobs:
             "auto_link_issuer.js",
             "package.json",
             "package-lock.json",
-            "version.json"
+            "version.json",
+            "update_script.js",
+            "INSTALL.bat"
           )
 
           foreach ($item in $include) {
@@ -76,35 +81,34 @@ jobs:
               } else {
                 Copy-Item -Path $item -Destination "package/$item"
               }
+              Write-Host "Copied: $item"
+            } else {
+              Write-Host "Not found: $item"
             }
-          }
-
-          # update_script.js 복사
-          if (Test-Path "update_script.js") {
-            Copy-Item -Path "update_script.js" -Destination "package/update_script.js"
           }
 
           # node_modules 복사
           Copy-Item -Path "node_modules" -Destination "package/node_modules" -Recurse
+          Write-Host "Copied: node_modules"
 
           # .env.example 생성
           @"
-          # Supabase 설정
-          SUPABASE_URL=https://your-project.supabase.co
-          SUPABASE_SERVICE_KEY=your-service-key
+# Supabase 설정
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-service-key
 
-          # Gemini API
-          GEMINI_API_KEY=your-gemini-key
+# Gemini API
+GEMINI_API_KEY=your-gemini-key
 
-          # 계정 ID
-          ACCOUNT_ID=1
+# 계정 ID
+ACCOUNT_ID=1
 
-          # Worker 이름
-          WORKER_NAME=worker-1
+# Worker 이름
+WORKER_NAME=worker-1
 
-          # 헤드리스 모드
-          HEADLESS=false
-          "@ | Out-File -FilePath "package/.env.example" -Encoding UTF8
+# 헤드리스 모드
+HEADLESS=false
+"@ | Out-File -FilePath "package/.env.example" -Encoding UTF8
 
           # output 폴더 생성
           New-Item -ItemType Directory -Force -Path "package/output"
@@ -114,81 +118,66 @@ jobs:
         run: |
           # START_CAFE.bat
           @"
-          @echo off
-          cd /d "%~dp0"
-          set PATH=%~dp0node;%PATH%
-          set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-          node src/writers/cafe_writer_supabase.js
-          pause
-          "@ | Out-File -FilePath "package/START_CAFE.bat" -Encoding ASCII
+@echo off
+cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+node src/writers/cafe_writer_supabase.js
+pause
+"@ | Out-File -FilePath "package/START_CAFE.bat" -Encoding ASCII
 
           # START_BLOG.bat
           @"
-          @echo off
-          cd /d "%~dp0"
-          set PATH=%~dp0node;%PATH%
-          set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-          node src/writers/blog_writer_supabase.js
-          pause
-          "@ | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
+@echo off
+cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+node src/writers/blog_writer_supabase.js
+pause
+"@ | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
 
           # START_SYNC.bat
           @"
-          @echo off
-          cd /d "%~dp0"
-          set PATH=%~dp0node;%PATH%
-          set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-          node full_sync_supabase.js
-          pause
-          "@ | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
+@echo off
+cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+node full_sync_supabase.js
+pause
+"@ | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
 
-          # UPDATE.bat (업데이터)
+          # UPDATE.bat
           @"
-          @echo off
-          chcp 65001 >nul
-          setlocal EnableDelayedExpansion
-          title Shopping Connect 업데이터
-
-          echo.
-          echo ========================================
-          echo   Shopping Connect 자동 업데이터
-          echo ========================================
-          echo.
-
-          cd /d "%~dp0"
-          set PATH=%~dp0node;%PATH%
-
-          if not exist "version.json" (
-              set "CURRENT_VERSION=0.0.0"
-          ) else (
-              for /f "tokens=2 delims=:," %%%%a in ('findstr "version" version.json') do (
-                  set "CURRENT_VERSION=%%%%~a"
-                  set "CURRENT_VERSION=!CURRENT_VERSION: =!"
-                  set "CURRENT_VERSION=!CURRENT_VERSION:"=!"
-              )
-          )
-
-          node update_script.js "!CURRENT_VERSION!"
-
-          echo.
-          pause
-          "@ | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
+@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+set PATH=%~dp0node;%PATH%
+node update_script.js
+pause
+"@ | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
 
       - name: Create ZIP package
         shell: pwsh
         run: |
           $version = "${{ steps.get_version.outputs.VERSION }}"
-          Compress-Archive -Path "package/*" -DestinationPath "shopping_connect_$version.zip"
+          $zipName = "shopping_connect_$version.zip"
+          Compress-Archive -Path "package/*" -DestinationPath $zipName
 
-          # 파일 크기 확인
-          $size = (Get-Item "shopping_connect_$version.zip").Length / 1MB
-          Write-Host "Package size: $([math]::Round($size, 2)) MB"
+          # 파일 존재 및 크기 확인
+          if (Test-Path $zipName) {
+            $size = (Get-Item $zipName).Length / 1MB
+            Write-Host "Package created: $zipName ($([math]::Round($size, 2)) MB)"
+          } else {
+            Write-Host "ERROR: ZIP file not created!"
+            exit 1
+          }
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
         with:
           files: shopping_connect_${{ steps.get_version.outputs.VERSION }}.zip
           name: Release ${{ steps.get_version.outputs.VERSION }}
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## Shopping Connect ${{ steps.get_version.outputs.VERSION }}
 
@@ -198,11 +187,13 @@ jobs:
             3. `.env.example`을 `.env`로 복사 후 설정
             4. `START_CAFE.bat` 또는 `START_BLOG.bat` 실행
 
+            ### 업데이트 방법
+            기존 설치된 폴더에서 `INSTALL.bat` 실행
+
             ### 포함 내용
             - Portable Node.js 20.11.0
             - Chromium Browser
             - 모든 소스코드 및 의존성
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: true
