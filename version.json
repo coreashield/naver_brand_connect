@@ -1,8 +1,8 @@
 {
-  "version": "1.7.0",
-  "updated_at": "2025-01-14",
+  "version": "1.8.0",
+  "updated_at": "2025-01-15",
   "changes": [
-    "중복 배치파일 제거 (START_CAFE, START_BLOG, START_AUTO)",
-    "한글 배치파일로 통일"
+    "auto_writer에 분산 락 적용 (동시 실행 시 상품 중복 선택 방지)",
+    "claimProductForPosting으로 원자적 상품 선택"
   ]
 }

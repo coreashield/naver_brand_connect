@@ -12,7 +12,8 @@ import http from 'http';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateContent } from '../utils/content_generator.js';
 import {
-  getProductsForPosting,
+  claimProductForPosting,
+  releaseProductLock,
   recordPost,
   registerWorker,
   updateWorkerHeartbeat,
@@ -834,20 +835,20 @@ async function main() {
       if (account.cafe_remaining > 0) {
         log(`\n========== 카페 모드 (${account.today_cafe_count}/${account.daily_cafe_limit}) ==========`);
 
-        const products = await getProductsForPosting('cafe', 1);
-        if (!products || products.length === 0) {
-          log('게시 가능한 상품 없음. 10분 대기...');
+        const product = await claimProductForPosting('cafe', WORKER_NAME, 10);
+        if (!product) {
+          log('게시 가능한 상품 없음 (또는 모두 락 상태). 10분 대기...');
           await page.waitForTimeout(10 * 60 * 1000);
           continue;
         }
 
-        const product = products[0];
-        log(`선택: ${product.name.substring(0, 40)}...`);
+        log(`선택 (락 획득): ${product.name.substring(0, 40)}...`);
 
         const images = await getProductImages(page, product, 'cafe');
         if (!images || images.length === 0) {
           log(`[SKIP] 이미지 없음`);
           await recordPost(product.product_id, worker?.id, 'cafe', false, 'No images');
+          await releaseProductLock(product.product_id);
           continue;
         }
 
@@ -866,6 +867,7 @@ async function main() {
           for (const img of images) {
             try { fs.unlinkSync(img); } catch (e) {}
           }
+          await releaseProductLock(product.product_id);
           continue;
         }
 
@@ -875,6 +877,7 @@ async function main() {
         }
 
         await recordPost(product.product_id, worker?.id, 'cafe', success === true, success === true ? null : 'Failed');
+        await releaseProductLock(product.product_id);
 
         // 이미지 정리
         for (const img of images) {
@@ -897,20 +900,20 @@ async function main() {
       else if (account.blog_remaining > 0) {
         log(`\n========== 블로그 모드 (${account.today_blog_count}/${account.daily_blog_limit}) ==========`);
 
-        const products = await getProductsForPosting('blog', 1);
-        if (!products || products.length === 0) {
-          log('게시 가능한 상품 없음. 10분 대기...');
+        const product = await claimProductForPosting('blog', WORKER_NAME, 15);
+        if (!product) {
+          log('게시 가능한 상품 없음 (또는 모두 락 상태). 10분 대기...');
           await page.waitForTimeout(10 * 60 * 1000);
           continue;
         }
 
-        const product = products[0];
-        log(`선택: ${product.name.substring(0, 40)}...`);
+        log(`선택 (락 획득): ${product.name.substring(0, 40)}...`);
 
         const images = await getProductImages(page, product, 'blog');
         if (!images || images.length === 0) {
           log(`[SKIP] 이미지 없음`);
           await recordPost(product.product_id, worker?.id, 'blog', false, 'No images');
+          await releaseProductLock(product.product_id);
           continue;
         }
 
@@ -922,6 +925,7 @@ async function main() {
         }
 
         await recordPost(product.product_id, worker?.id, 'blog', success, success ? null : 'Failed');
+        await releaseProductLock(product.product_id);
 
         // 이미지 정리
         for (const img of images) {
