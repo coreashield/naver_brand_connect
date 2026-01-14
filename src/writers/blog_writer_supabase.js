@@ -11,7 +11,8 @@ import https from 'https';
 import http from 'http';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
-  getProductsForPosting,
+  claimProductForPosting,
+  releaseProductLock,
   recordPost,
   registerWorker,
   updateWorkerHeartbeat,
@@ -1031,19 +1032,19 @@ async function main() {
         } catch (e) {}
       }
 
-      log(`\n📊 Supabase에서 상품 조회 중... (오늘: ${account.today_blog_count}/${account.daily_blog_limit}개, 남음: ${account.blog_remaining}개)`);
-      const products = await getProductsForPosting('blog', 1);
+      log(`\n📊 상품 클레임 중... (오늘: ${account.today_blog_count}/${account.daily_blog_limit}개, 남음: ${account.blog_remaining}개)`);
+      const product = await claimProductForPosting('blog', WORKER_NAME, 15);
 
-      if (!products || products.length === 0) {
+      if (!product) {
         log('게시 가능한 상품이 없습니다. 10분 후 다시 확인...');
         await page.waitForTimeout(10 * 60 * 1000);
         continue;
       }
 
-      const product = products[0];
-      log(`\n선택된 상품: ${product.name.substring(0, 30)}...`);
-      log(`  블로그 게시 횟수: ${product.blog_count}회`);
-      log(`  총 게시 횟수: ${product.total_count}회`);
+      log(`\n✅ 상품 클레임 성공 (락 15분)`);
+      log(`  상품: ${product.name.substring(0, 30)}...`);
+      log(`  가격: ${product.price_numeric?.toLocaleString() || product.price}원`);
+      log(`  블로그 게시: ${product.blog_count}회 | 총: ${product.total_count}회`);
 
       const productUrl = product.product_url || '';
       const affiliateLink = product.affiliate_link || '';
@@ -1062,6 +1063,10 @@ async function main() {
             false,
             'No images - page unavailable'
           );
+        } catch (e) {}
+        // 락 해제
+        try {
+          await releaseProductLock(product.product_id);
         } catch (e) {}
         await page.waitForTimeout(3000);
         continue;
@@ -1086,6 +1091,14 @@ async function main() {
         log(`  Post record saved`);
       } catch (e) {
         log(`  Warning: Failed to save record: ${e.message}`);
+      }
+
+      // 락 해제
+      try {
+        await releaseProductLock(product.product_id);
+        log(`  🔓 락 해제 완료`);
+      } catch (e) {
+        log(`  Warning: Failed to release lock: ${e.message}`);
       }
 
       for (const img of images) {

@@ -90,12 +90,10 @@ export async function getAllProducts() {
 }
 
 /**
- * 게시 횟수가 적은 상품 조회 (플랫폼별)
- * - 최근 24시간 이내 게시된 상품 제외 (중복 방지 강화)
- * - 상위 50개 중 랜덤 선택 (다양성 확보 + 중복 방지)
+ * 게시 횟수가 적은 상품 조회 (플랫폼별) - 레거시 (락 없음)
+ * @deprecated claimProductForPosting 사용 권장
  */
 export async function getProductsForPosting(platform, limit = 1) {
-  // 최근 24시간 이내 게시된 상품 ID 조회 (중복 방지 강화)
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: recentPosts } = await supabase
@@ -106,7 +104,6 @@ export async function getProductsForPosting(platform, limit = 1) {
 
   const recentProductIds = recentPosts?.map(p => p.product_id) || [];
 
-  // 상위 50개 후보 조회 (중복 방지를 위해 풀 확대)
   let query = supabase
     .from('product_post_counts')
     .select('*')
@@ -121,17 +118,58 @@ export async function getProductsForPosting(platform, limit = 1) {
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
-  // 최근 게시된 상품 제외
   let candidates = data.filter(p => !recentProductIds.includes(p.product_id));
 
-  // 후보가 없으면 전체에서 선택
   if (candidates.length === 0) {
     candidates = data;
   }
 
-  // 랜덤 셔플 후 limit만큼 반환
   const shuffled = candidates.sort(() => Math.random() - 0.5);
   return shuffled.slice(0, limit);
+}
+
+/**
+ * 상품 클레임 (원자적 락 획득) - 동시 실행 시 중복 방지
+ * - 게시 횟수 적은 순 + 가격 높은 순 우선
+ * - 락 획득과 동시에 상품 반환
+ * @param {string} platform - 'cafe' 또는 'blog'
+ * @param {string} workerId - 워커 식별자
+ * @param {number} lockMinutes - 락 유지 시간 (기본 10분)
+ * @returns {Object|null} 상품 정보 또는 null
+ */
+export async function claimProductForPosting(platform, workerId, lockMinutes = 10) {
+  const { data, error } = await supabase
+    .rpc('claim_product_for_posting', {
+      p_platform: platform,
+      p_worker_id: workerId,
+      p_lock_minutes: lockMinutes
+    });
+
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+/**
+ * 상품 락 해제
+ * @param {string} productId - 상품 ID
+ */
+export async function releaseProductLock(productId) {
+  const { error } = await supabase
+    .rpc('release_product_lock', { p_product_id: productId });
+
+  if (error) throw error;
+}
+
+/**
+ * 만료된 락 정리
+ * @returns {number} 정리된 락 수
+ */
+export async function cleanupExpiredLocks() {
+  const { data, error } = await supabase
+    .rpc('cleanup_expired_locks');
+
+  if (error) throw error;
+  return data || 0;
 }
 
 /**
@@ -616,6 +654,9 @@ export default {
   upsertProducts,
   getAllProducts,
   getProductsForPosting,
+  claimProductForPosting,
+  releaseProductLock,
+  cleanupExpiredLocks,
   getProductCount,
   registerWorker,
   updateWorkerHeartbeat,
