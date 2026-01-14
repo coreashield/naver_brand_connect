@@ -17,7 +17,7 @@ const CONFIG = {
   // GitHub 저장소 설정
   github: {
     owner: 'coreashield',
-    repo: 'shopping_connect',
+    repo: 'naver_brand_connect',
     branch: 'main'
   },
   // 로컬 파일 경로
