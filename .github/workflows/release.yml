@@ -1,6 +1,3 @@
-# GitHub Actions: 자동 릴리스 빌드
-# 태그 푸시 시 portable 패키지 생성 및 Releases 업로드
-
 name: Build and Release
 
 on:
@@ -69,21 +66,7 @@ jobs:
       - name: Copy source files
         shell: pwsh
         run: |
-          # 소스 파일 복사
-          $include = @(
-            "src",
-            "app.js",
-            "cafe_writer.js",
-            "full_sync.js",
-            "full_sync_supabase.js",
-            "auto_link_issuer.js",
-            "package.json",
-            "package-lock.json",
-            "version.json",
-            "update_script.js",
-            "INSTALL.bat"
-          )
-
+          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat")
           foreach ($item in $include) {
             if (Test-Path $item) {
               if ((Get-Item $item).PSIsContainer) {
@@ -92,79 +75,24 @@ jobs:
                 Copy-Item -Path $item -Destination "package/$item"
               }
               Write-Host "Copied: $item"
-            } else {
-              Write-Host "Not found: $item"
             }
           }
-
-          # node_modules 복사
           Copy-Item -Path "node_modules" -Destination "package/node_modules" -Recurse
-          Write-Host "Copied: node_modules"
-
-          # .env.example 생성
-          @"
-# Supabase 설정
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-service-key
-
-# Gemini API
-GEMINI_API_KEY=your-gemini-key
-
-# 계정 ID
-ACCOUNT_ID=1
-
-# Worker 이름
-WORKER_NAME=worker-1
-
-# 헤드리스 모드
-HEADLESS=false
-"@ | Out-File -FilePath "package/.env.example" -Encoding UTF8
-
-          # output 폴더 생성
           New-Item -ItemType Directory -Force -Path "package/output"
+          $envContent = "SUPABASE_URL=https://your-project.supabase.co`nSUPABASE_SERVICE_KEY=your-key`nGEMINI_API_KEY=your-key`nACCOUNT_ID=1`nWORKER_NAME=worker-1`nHEADLESS=false"
+          $envContent | Out-File -FilePath "package/.env.example" -Encoding UTF8
 
       - name: Create batch files
         shell: pwsh
         run: |
-          # START_CAFE.bat
-          @"
-@echo off
-cd /d "%~dp0"
-set PATH=%~dp0node;%PATH%
-set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-node src/writers/cafe_writer_supabase.js
-pause
-"@ | Out-File -FilePath "package/START_CAFE.bat" -Encoding ASCII
-
-          # START_BLOG.bat
-          @"
-@echo off
-cd /d "%~dp0"
-set PATH=%~dp0node;%PATH%
-set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-node src/writers/blog_writer_supabase.js
-pause
-"@ | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
-
-          # START_SYNC.bat
-          @"
-@echo off
-cd /d "%~dp0"
-set PATH=%~dp0node;%PATH%
-set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-node full_sync_supabase.js
-pause
-"@ | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
-
-          # UPDATE.bat
-          @"
-@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-set PATH=%~dp0node;%PATH%
-node update_script.js
-pause
-"@ | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
+          $cafe = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/cafe_writer_supabase.js`npause"
+          $cafe | Out-File -FilePath "package/START_CAFE.bat" -Encoding ASCII
+          $blog = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/blog_writer_supabase.js`npause"
+          $blog | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
+          $sync = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode full_sync_supabase.js`npause"
+          $sync | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
+          $update = "@echo off`nchcp 65001 >nul`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nnode update_script.js`npause"
+          $update | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
 
       - name: Create ZIP package
         shell: pwsh
@@ -172,8 +100,6 @@ pause
           $version = "${{ steps.get_version.outputs.VERSION }}"
           $zipName = "shopping_connect_$version.zip"
           Compress-Archive -Path "package/*" -DestinationPath $zipName
-
-          # 파일 존재 및 크기 확인
           if (Test-Path $zipName) {
             $size = (Get-Item $zipName).Length / 1MB
             Write-Host "Package created: $zipName ($([math]::Round($size, 2)) MB)"
@@ -192,13 +118,9 @@ pause
             ## Shopping Connect ${{ steps.get_version.outputs.VERSION }}
 
             ### 설치 방법
-            1. `shopping_connect_${{ steps.get_version.outputs.VERSION }}.zip` 다운로드
-            2. 압축 해제
-            3. `.env.example`을 `.env`로 복사 후 설정
-            4. `START_CAFE.bat` 또는 `START_BLOG.bat` 실행
-
-            ### 업데이트 방법
-            기존 설치된 폴더에서 `INSTALL.bat` 실행
+            1. ZIP 다운로드 후 압축 해제
+            2. .env.example을 .env로 복사 후 설정
+            3. START_CAFE.bat 또는 START_BLOG.bat 실행
 
             ### 포함 내용
             - Portable Node.js 20.11.0
@@ -206,4 +128,3 @@ pause
             - 모든 소스코드 및 의존성
           draft: false
           prerelease: false
-          fail_on_unmatched_files: true
