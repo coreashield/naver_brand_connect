@@ -1,10 +1,9 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "updated_at": "2025-01-14",
   "changes": [
-    "GitHub Actions 자동 릴리스 시스템 추가",
-    "Portable 패키지 자동 빌드",
-    "클라이언트 자동 업데이트 기능 (INSTALL.bat)",
-    "워크플로우 권한 수정"
+    "GitHub Actions 자동 릴리스 시스템",
+    "Portable 패키지 자동 빌드 (Node.js + Chromium)",
+    "클라이언트 자동 업데이트 (INSTALL.bat)"
   ]
 }
