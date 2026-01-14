@@ -1,7 +1,8 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
   "updated_at": "2025-01-14",
   "changes": [
-    "START_AUTO.bat 추가 (자동화 스크립트)"
+    "중복 배치파일 제거 (START_CAFE, START_BLOG, START_AUTO)",
+    "한글 배치파일로 통일"
   ]
 }

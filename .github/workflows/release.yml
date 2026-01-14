@@ -85,14 +85,8 @@ jobs:
       - name: Create batch files
         shell: pwsh
         run: |
-          $cafe = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/cafe_writer_supabase.js`npause"
-          $cafe | Out-File -FilePath "package/START_CAFE.bat" -Encoding ASCII
-          $blog = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/blog_writer_supabase.js`npause"
-          $blog | Out-File -FilePath "package/START_BLOG.bat" -Encoding ASCII
           $sync = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode full_sync_supabase.js`npause"
           $sync | Out-File -FilePath "package/START_SYNC.bat" -Encoding ASCII
-          $auto = "@echo off`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nset PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers`nnode src/writers/auto_writer.js`npause"
-          $auto | Out-File -FilePath "package/START_AUTO.bat" -Encoding ASCII
           $update = "@echo off`nchcp 65001 >nul`ncd /d `"%~dp0`"`nset PATH=%~dp0node;%PATH%`nnode update_script.js`npause"
           $update | Out-File -FilePath "package/UPDATE.bat" -Encoding ASCII
 
@@ -122,7 +116,13 @@ jobs:
             ### 설치 방법
             1. ZIP 다운로드 후 압축 해제
             2. .env.example을 .env로 복사 후 설정
-            3. START_CAFE.bat 또는 START_BLOG.bat 실행
+            3. 자동글쓰기.bat 실행
+
+            ### 포함 배치파일
+            - 자동글쓰기.bat (카페+블로그 자동)
+            - 카페글쓰기.bat
+            - 블로그글쓰기.bat
+            - 상품정보업데이트.bat
 
             ### 포함 내용
             - Portable Node.js 20.11.0
