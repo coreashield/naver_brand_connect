@@ -1,8 +1,9 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "updated_at": "2025-01-15",
   "changes": [
-    "auto_writer에 분산 락 적용 (동시 실행 시 상품 중복 선택 방지)",
-    "claimProductForPosting으로 원자적 상품 선택"
+    "프로젝트 구조 정리 (불필요한 파일 삭제)",
+    "계정 관리 기능 추가 (manage_accounts.js)",
+    "DB 패치 파일 추가"
   ]
 }
