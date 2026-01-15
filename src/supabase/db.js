@@ -577,6 +577,7 @@ export async function addAccount(account) {
       naver_pw: account.naverPw,
       blog_id: account.blogId || account.naverId,
       cafe_url: account.cafeUrl,
+      cafe_alias: account.cafeAlias || null,
       daily_cafe_limit: account.dailyCafeLimit || 200,
       daily_blog_limit: account.dailyBlogLimit || 5,
       memo: account.memo

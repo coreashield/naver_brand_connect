@@ -43,7 +43,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(200, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     res.end();
@@ -87,6 +87,7 @@ const server = createServer(async (req, res) => {
           naver_pw: body.naver_pw,
           blog_id: body.blog_id || body.naver_id,
           cafe_url: body.cafe_url || null,
+          cafe_alias: body.cafe_alias || null,
           daily_cafe_limit: body.daily_cafe_limit ?? 150,
           daily_blog_limit: body.daily_blog_limit ?? 5,
           memo: body.memo || null
@@ -174,6 +175,36 @@ const server = createServer(async (req, res) => {
 
       if (error) throw error;
       jsonResponse(res, { success: true });
+    } catch (err) {
+      jsonResponse(res, { success: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  // API: 계정 정보 수정 (PUT)
+  if (url.pathname.startsWith('/api/accounts/') && !url.pathname.includes('/status') && !url.pathname.includes('/counts') && req.method === 'PUT') {
+    try {
+      const id = url.pathname.split('/').pop();
+      const body = await parseBody(req);
+
+      const updateData = { updated_at: new Date().toISOString() };
+      if (body.naver_pw !== undefined) updateData.naver_pw = body.naver_pw;
+      if (body.blog_id !== undefined) updateData.blog_id = body.blog_id;
+      if (body.cafe_url !== undefined) updateData.cafe_url = body.cafe_url || null;
+      if (body.cafe_alias !== undefined) updateData.cafe_alias = body.cafe_alias || null;
+      if (body.daily_cafe_limit !== undefined) updateData.daily_cafe_limit = body.daily_cafe_limit;
+      if (body.daily_blog_limit !== undefined) updateData.daily_blog_limit = body.daily_blog_limit;
+      if (body.memo !== undefined) updateData.memo = body.memo || null;
+
+      const { data, error } = await supabase
+        .from('naver_accounts')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      jsonResponse(res, { success: true, data });
     } catch (err) {
       jsonResponse(res, { success: false, error: err.message }, 500);
     }

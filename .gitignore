@@ -6,14 +6,24 @@ node_modules/
 
 # Output files
 output/
+downloads/
 
 # Portable packages (large files - download from Releases)
 portable_package/
 cafe_standalone/
 node_portable/
 packages/
-scripts/node-portable/
+scripts/
+dist/
 *.zip
+
+# Browser data (login sessions)
+playwright-data/
+
+# MCP and IDE local settings
+.playwright-mcp/
+.serena/
+.claude/settings.local.json
 
 # OS files
 .DS_Store
@@ -29,6 +39,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+tmpclaude-*-cwd
+install.ps1
 
 # Windows special files
 nul

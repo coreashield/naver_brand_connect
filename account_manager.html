@@ -140,6 +140,13 @@
 
     .count-cell { cursor: pointer; transition: all 0.2s; padding: 2px 4px; border-radius: 4px; }
     .count-cell:hover { background: #e8f0fe; color: #667eea; }
+    .alias-cell { cursor: pointer; transition: all 0.2s; padding: 2px 4px; border-radius: 4px; color: #667eea; }
+    .alias-cell:hover { background: #e8f0fe; text-decoration: underline; }
+    .id-cell { cursor: pointer; transition: all 0.2s; padding: 2px 4px; border-radius: 4px; font-weight: bold; color: #333; }
+    .id-cell:hover { background: #fff3cd; color: #856404; }
+    .editing-row { background: #fff3cd !important; }
+    .card.edit-mode { border: 3px solid #ffa502; }
+    .card.edit-mode h2 { color: #ffa502; }
     .count-cell input {
       width: 40px;
       padding: 2px;
@@ -179,10 +186,11 @@
       </div>
     </div>
 
-    <!-- 계정 추가 -->
-    <div class="card">
-      <h2>➕ 새 계정 추가</h2>
+    <!-- 계정 추가/수정 -->
+    <div class="card" id="formCard">
+      <h2 id="formTitle">➕ 새 계정 추가</h2>
       <div id="alertAdd" class="alert"></div>
+      <input type="hidden" id="editingId" value="">
       <div class="form-grid">
         <div class="form-group">
           <label>네이버 ID *</label>
@@ -198,7 +206,11 @@
         </div>
         <div class="form-group">
           <label>카페 글쓰기 URL</label>
-          <input type="text" id="cafeUrl" placeholder="https://cafe.naver.com/...">
+          <input type="text" id="cafeUrl" placeholder="https://cafe.naver.com/ca-fe/cafes/.../articles/write">
+        </div>
+        <div class="form-group">
+          <label>카페 별칭 (가입용)</label>
+          <input type="text" id="cafeAlias" placeholder="todaydeuktem">
         </div>
         <div class="form-group">
           <label>일일 카페 제한</label>
@@ -213,7 +225,12 @@
           <input type="text" id="memo" placeholder="계정에 대한 메모">
         </div>
       </div>
-      <button class="btn btn-primary" onclick="addAccount()">계정 추가</button>
+      <div id="formButtons">
+        <button class="btn btn-primary" id="btnAdd" onclick="addAccount()">계정 추가</button>
+        <button class="btn btn-success" id="btnUpdate" onclick="updateAccount()" style="display:none;">수정 저장</button>
+        <button class="btn btn-primary" id="btnSaveNew" onclick="saveAsNew()" style="display:none;">새로 저장</button>
+        <button class="btn btn-danger" id="btnCancel" onclick="cancelEdit()" style="display:none;">취소</button>
+      </div>
     </div>
 
     <!-- 계정 목록 -->
@@ -228,7 +245,8 @@
               <th>네이버ID</th>
               <th>비밀번호</th>
               <th>블로그ID</th>
-              <th>카페</th>
+              <th>카페별칭</th>
+              <th>카페URL</th>
               <th style="text-align:center;">⚡</th>
               <th>카페글</th>
               <th>블로그글</th>
@@ -237,7 +255,7 @@
             </tr>
           </thead>
           <tbody id="accountsTable">
-            <tr><td colspan="10" class="loading">로딩 중...</td></tr>
+            <tr><td colspan="11" class="loading">로딩 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -259,7 +277,7 @@
     // 계정 목록 로드
     async function loadAccounts() {
       const tbody = document.getElementById('accountsTable');
-      tbody.innerHTML = '<tr><td colspan="10" class="loading">로딩 중...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="loading">로딩 중...</td></tr>';
 
       try {
         const res = await fetch('/api/accounts');
@@ -269,18 +287,19 @@
 
         const data = result.data;
         if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" class="loading">등록된 계정이 없습니다.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="11" class="loading">등록된 계정이 없습니다.</td></tr>';
           updateStats([]);
           return;
         }
 
         tbody.innerHTML = data.map(acc => `
-          <tr>
+          <tr data-id="${acc.id}">
             <td>${acc.id}</td>
-            <td>${acc.naver_id}</td>
+            <td class="id-cell" onclick="loadAccountToForm(${acc.id})" title="클릭하여 수정">${acc.naver_id}</td>
             <td class="pw-cell" onclick="togglePw(this, '${acc.naver_pw}')">••••••••</td>
             <td>${acc.blog_id || '-'}</td>
-            <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;" onclick="copyToClipboard('${acc.cafe_url || ''}')" title="클릭하여 복사">${acc.cafe_url || '-'}</td>
+            <td class="alias-cell" onclick="goToCafe('${acc.cafe_alias || ''}')" title="클릭하여 카페 이동">${acc.cafe_alias || '-'}</td>
+            <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;" onclick="copyToClipboard('${acc.cafe_url || ''}')" title="클릭하여 복사">${acc.cafe_url ? '...' + acc.cafe_url.slice(-30) : '-'}</td>
             <td style="text-align:center;">${acc.status === 'active' ? '✅' : '⛔'}</td>
             <td>
               <span class="count-cell" onclick="editCount(this, ${acc.id}, 'today_cafe_count', ${acc.today_cafe_count})" title="클릭하여 수정">
@@ -307,11 +326,14 @@
           </tr>
         `).join('');
 
+        // 계정 데이터 저장 (수정용)
+        window.accountsData = data;
+
         updateStats(data);
 
       } catch (err) {
         showAlert('alertList', 'error', '로드 실패: ' + err.message);
-        tbody.innerHTML = '<tr><td colspan="10" class="loading">오류 발생</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="loading">오류 발생</td></tr>';
       }
     }
 
@@ -347,6 +369,7 @@
             naver_pw: naverPw,
             blog_id: document.getElementById('blogId').value.trim() || naverId,
             cafe_url: document.getElementById('cafeUrl').value.trim(),
+            cafe_alias: document.getElementById('cafeAlias').value.trim(),
             daily_cafe_limit: parseInt(document.getElementById('dailyCafeLimit').value) || 150,
             daily_blog_limit: parseInt(document.getElementById('dailyBlogLimit').value) ?? 5,
             memo: document.getElementById('memo').value.trim()
@@ -363,6 +386,7 @@
         document.getElementById('naverPw').value = '';
         document.getElementById('blogId').value = '';
         document.getElementById('cafeUrl').value = '';
+        document.getElementById('cafeAlias').value = '';
         document.getElementById('memo').value = '';
 
         loadAccounts();
@@ -482,13 +506,219 @@
         };
         showAlert('alertList', 'success', `✅ ${labels[field]}가 ${newValue}로 수정되었습니다.`);
 
-        // 통계 갱신
-        loadAccounts();
+        // 메모리 데이터도 업데이트 (테이블 새로고침 없이)
+        if (window.accountsData) {
+          const acc = window.accountsData.find(a => a.id == accountId);
+          if (acc) acc[field] = newValue;
+        }
 
       } catch (err) {
         alert('수정 실패: ' + err.message);
         parentEl.textContent = originalValue;
       }
+    }
+
+    // 텍스트 필드 수정 (카페별칭 등)
+    function editTextField(el, accountId, field, currentValue) {
+      if (el.querySelector('input')) return;
+
+      const originalValue = currentValue || '';
+      const displayValue = originalValue || '-';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = originalValue;
+      input.style.cssText = 'width:100px; padding:2px; border:2px solid #667eea; border-radius:4px; font-size:12px;';
+      input.dataset.accountId = accountId;
+      input.dataset.field = field;
+      input.dataset.originalValue = originalValue;
+      input.dataset.displayValue = displayValue;
+
+      el.textContent = '';
+      el.appendChild(input);
+      input.focus();
+      input.select();
+
+      input.addEventListener('blur', handleTextFieldBlur);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          this.parentElement.textContent = this.dataset.displayValue;
+        }
+      });
+    }
+
+    // 텍스트 필드 blur 핸들러
+    async function handleTextFieldBlur(e) {
+      const input = e.target;
+      const accountId = input.dataset.accountId;
+      const field = input.dataset.field;
+      const originalValue = input.dataset.originalValue;
+      const displayValue = input.dataset.displayValue;
+      const newValue = input.value.trim();
+      const parentEl = input.parentElement;
+
+      if (newValue === originalValue) {
+        parentEl.textContent = displayValue;
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/accounts/${accountId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [field]: newValue })
+        });
+
+        const result = await res.json();
+        if (!result.success) throw new Error(result.error);
+
+        parentEl.textContent = newValue || '-';
+        const labels = { cafe_alias: '카페 별칭', cafe_url: '카페 URL', memo: '메모', blog_id: '블로그 ID' };
+        showAlert('alertList', 'success', `✅ ${labels[field] || field}가 수정되었습니다.`);
+
+      } catch (err) {
+        alert('수정 실패: ' + err.message);
+        parentEl.textContent = displayValue;
+      }
+    }
+
+    // 카페 링크로 이동 (클릭)
+    function goToCafe(alias) {
+      if (!alias || alias === '-') {
+        showAlert('alertList', 'error', '카페 별칭이 설정되지 않았습니다.');
+        return;
+      }
+      window.open(`https://cafe.naver.com/${alias}`, '_blank');
+    }
+
+    // 계정 정보를 폼에 로드 (수정 모드)
+    function loadAccountToForm(accountId) {
+      const acc = window.accountsData?.find(a => a.id === accountId);
+      if (!acc) {
+        alert('계정 정보를 찾을 수 없습니다.');
+        return;
+      }
+
+      // 폼에 데이터 채우기
+      document.getElementById('editingId').value = acc.id;
+      document.getElementById('naverId').value = acc.naver_id;
+      document.getElementById('naverId').disabled = true; // ID는 수정 불가
+      document.getElementById('naverPw').value = acc.naver_pw;
+      document.getElementById('blogId').value = acc.blog_id || '';
+      document.getElementById('cafeUrl').value = acc.cafe_url || '';
+      document.getElementById('cafeAlias').value = acc.cafe_alias || '';
+      document.getElementById('dailyCafeLimit').value = acc.daily_cafe_limit || 150;
+      document.getElementById('dailyBlogLimit').value = acc.daily_blog_limit || 5;
+      document.getElementById('memo').value = acc.memo || '';
+
+      // UI 변경 - 수정 모드
+      document.getElementById('formTitle').textContent = `✏️ 계정 수정: ${acc.naver_id}`;
+      document.getElementById('formCard').classList.add('edit-mode');
+      document.getElementById('btnAdd').style.display = 'none';
+      document.getElementById('btnUpdate').style.display = 'inline-block';
+      document.getElementById('btnSaveNew').style.display = 'inline-block';
+      document.getElementById('btnCancel').style.display = 'inline-block';
+
+      // 테이블에서 해당 행 하이라이트
+      document.querySelectorAll('#accountsTable tr').forEach(tr => tr.classList.remove('editing-row'));
+      document.querySelector(`#accountsTable tr[data-id="${accountId}"]`)?.classList.add('editing-row');
+
+      // 폼으로 스크롤
+      document.getElementById('formCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      showAlert('alertAdd', 'success', `📝 "${acc.naver_id}" 계정 정보가 로드되었습니다. 수정 후 "수정 저장" 버튼을 클릭하세요.`);
+    }
+
+    // 계정 수정 저장
+    async function updateAccount() {
+      const editingId = document.getElementById('editingId').value;
+      if (!editingId) {
+        alert('수정할 계정이 선택되지 않았습니다.');
+        return;
+      }
+
+      const naverPw = document.getElementById('naverPw').value.trim();
+      if (!naverPw) {
+        showAlert('alertAdd', 'error', '비밀번호는 필수입니다.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/accounts/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            naver_pw: naverPw,
+            blog_id: document.getElementById('blogId').value.trim() || null,
+            cafe_url: document.getElementById('cafeUrl').value.trim() || null,
+            cafe_alias: document.getElementById('cafeAlias').value.trim() || null,
+            daily_cafe_limit: parseInt(document.getElementById('dailyCafeLimit').value) || 150,
+            daily_blog_limit: parseInt(document.getElementById('dailyBlogLimit').value) || 5,
+            memo: document.getElementById('memo').value.trim() || null
+          })
+        });
+
+        const result = await res.json();
+        if (!result.success) throw new Error(result.error);
+
+        showAlert('alertAdd', 'success', '✅ 계정 정보가 수정되었습니다!');
+        cancelEdit(); // 폼 초기화
+        loadAccounts(); // 목록 새로고침
+
+      } catch (err) {
+        showAlert('alertAdd', 'error', '수정 실패: ' + err.message);
+      }
+    }
+
+    // 수정 취소 (폼 초기화)
+    function cancelEdit() {
+      document.getElementById('editingId').value = '';
+      document.getElementById('naverId').value = '';
+      document.getElementById('naverId').disabled = false;
+      document.getElementById('naverPw').value = '';
+      document.getElementById('blogId').value = '';
+      document.getElementById('cafeUrl').value = '';
+      document.getElementById('cafeAlias').value = '';
+      document.getElementById('dailyCafeLimit').value = '150';
+      document.getElementById('dailyBlogLimit').value = '5';
+      document.getElementById('memo').value = '';
+
+      // UI 변경 - 추가 모드
+      document.getElementById('formTitle').textContent = '➕ 새 계정 추가';
+      document.getElementById('formCard').classList.remove('edit-mode');
+      document.getElementById('btnAdd').style.display = 'inline-block';
+      document.getElementById('btnUpdate').style.display = 'none';
+      document.getElementById('btnSaveNew').style.display = 'none';
+      document.getElementById('btnCancel').style.display = 'none';
+
+      // 테이블 하이라이트 제거
+      document.querySelectorAll('#accountsTable tr').forEach(tr => tr.classList.remove('editing-row'));
+    }
+
+    // 새로 저장 (ID/비번만 바꿔서 새 계정으로 추가)
+    function saveAsNew() {
+      // ID 입력 활성화 (기존 값 유지, 수정 가능)
+      document.getElementById('naverId').disabled = false;
+      document.getElementById('naverId').focus();
+      document.getElementById('naverId').select(); // 전체 선택으로 바로 수정 가능
+
+      // editingId 초기화 (새 계정 추가 모드)
+      document.getElementById('editingId').value = '';
+
+      // UI 변경
+      document.getElementById('formTitle').textContent = '➕ 새 계정으로 저장 (ID 수정 후 추가)';
+      document.getElementById('formCard').classList.remove('edit-mode');
+      document.getElementById('btnUpdate').style.display = 'none';
+      document.getElementById('btnSaveNew').style.display = 'none';
+      document.getElementById('btnAdd').style.display = 'inline-block';
+
+      // 테이블 하이라이트 제거
+      document.querySelectorAll('#accountsTable tr').forEach(tr => tr.classList.remove('editing-row'));
+
+      showAlert('alertAdd', 'success', '📝 ID를 새로운 값으로 변경 후 "계정 추가" 버튼을 클릭하세요. (같은 ID는 중복 오류)');
     }
 
     // 전역 노출
@@ -498,6 +728,12 @@
     window.deleteAccount = deleteAccount;
     window.togglePw = togglePw;
     window.editCount = editCount;
+    window.editTextField = editTextField;
+    window.goToCafe = goToCafe;
+    window.loadAccountToForm = loadAccountToForm;
+    window.updateAccount = updateAccount;
+    window.cancelEdit = cancelEdit;
+    window.saveAsNew = saveAsNew;
   </script>
 </body>
 </html>
