@@ -1,9 +1,8 @@
 {
-  "version": "1.8.1",
+  "version": "1.8.2",
   "updated_at": "2025-01-15",
   "changes": [
-    "프로젝트 구조 정리 (불필요한 파일 삭제)",
-    "계정 관리 기능 추가 (manage_accounts.js)",
-    "DB 패치 파일 추가"
+    "cleanup.bat 추가 (기존 파일 정리용)",
+    "프로젝트 구조 정리"
   ]
 }
