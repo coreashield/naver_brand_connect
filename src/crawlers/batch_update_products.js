@@ -152,7 +152,7 @@ async function main() {
           }
         } else {
           log(`  [WARN] Crawl failed: ${info.error}`);
-          await updateProduct(product.product_id, { crawledAt: new Date().toISOString() });
+          // 실패 시 detail_crawled_at 업데이트 안 함 → 다음에 다시 시도
           failCount++;
         }
 

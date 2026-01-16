@@ -1,11 +1,23 @@
 import { chromium } from 'playwright';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import { getAccountById } from './src/supabase/db.js';
 
 dotenv.config();
 
-const NAVER_ID = process.env.NAVER_ID?.trim();
-const NAVER_PW = process.env.NAVER_PW?.trim();
+// Supabase에서 계정 정보 가져오기 (ACCOUNT_ID=1 사용)
+const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
+let NAVER_ID, NAVER_PW;
+
+async function loadAccount() {
+  const account = await getAccountById(ACCOUNT_ID);
+  if (!account) {
+    throw new Error(`계정 ID ${ACCOUNT_ID}를 찾을 수 없습니다. naver_accounts 테이블을 확인하세요.`);
+  }
+  NAVER_ID = account.naver_id;
+  NAVER_PW = account.naver_pw;
+  console.log(`  📧 계정: ${NAVER_ID}`);
+}
 
 // URLs
 const CATEGORY_URL = 'https://brandconnect.naver.com/904249244338784/affiliate/products/category';
@@ -96,6 +108,9 @@ async function main() {
     console.log('═══════════════════════════════════════════════');
     console.log('[1/3] 네이버 로그인');
     console.log('═══════════════════════════════════════════════\n');
+
+    // Supabase에서 계정 정보 로드
+    await loadAccount();
 
     await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1000);

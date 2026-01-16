@@ -162,10 +162,12 @@ const server = createServer(async (req, res) => {
         updateData.today_blog_count = parseInt(body.today_blog_count) || 0;
       }
       if (body.daily_cafe_limit !== undefined) {
-        updateData.daily_cafe_limit = parseInt(body.daily_cafe_limit) ?? 150;
+        const val = parseInt(body.daily_cafe_limit);
+        updateData.daily_cafe_limit = isNaN(val) ? 150 : val;
       }
       if (body.daily_blog_limit !== undefined) {
-        updateData.daily_blog_limit = parseInt(body.daily_blog_limit) ?? 5;
+        const val = parseInt(body.daily_blog_limit);
+        updateData.daily_blog_limit = isNaN(val) ? 5 : val;
       }
 
       const { error } = await supabase
@@ -192,8 +194,14 @@ const server = createServer(async (req, res) => {
       if (body.blog_id !== undefined) updateData.blog_id = body.blog_id;
       if (body.cafe_url !== undefined) updateData.cafe_url = body.cafe_url || null;
       if (body.cafe_alias !== undefined) updateData.cafe_alias = body.cafe_alias || null;
-      if (body.daily_cafe_limit !== undefined) updateData.daily_cafe_limit = body.daily_cafe_limit;
-      if (body.daily_blog_limit !== undefined) updateData.daily_blog_limit = body.daily_blog_limit;
+      if (body.daily_cafe_limit !== undefined) {
+        const val = parseInt(body.daily_cafe_limit);
+        updateData.daily_cafe_limit = isNaN(val) ? 150 : val;
+      }
+      if (body.daily_blog_limit !== undefined) {
+        const val = parseInt(body.daily_blog_limit);
+        updateData.daily_blog_limit = isNaN(val) ? 5 : val;
+      }
       if (body.memo !== undefined) updateData.memo = body.memo || null;
 
       const { data, error } = await supabase

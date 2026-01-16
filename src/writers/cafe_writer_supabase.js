@@ -492,7 +492,7 @@ async function writePost(page, product, images, doLoginFn) {
 
     await page.waitForTimeout(1000);
 
-    // 게시판 선택
+    // 게시판 선택 (첫 번째 게시판 자동 선택)
     try {
       const boardDropdown = page.locator('text=게시판을 선택해 주세요.').first();
       if (await boardDropdown.count() > 0) {
@@ -500,11 +500,22 @@ async function writePost(page, product, images, doLoginFn) {
         await boardDropdown.click();
         await page.waitForTimeout(1500);
 
-        const boardOption = page.locator('text=자유게시판').first();
-        if (await boardOption.count() > 0) {
-          await boardOption.click();
+        // 첫 번째 게시판 옵션 선택 (리스트에서 첫 번째 항목)
+        const boardOptions = page.locator('ul[role="listbox"] li, [class*="select_list"] li, [class*="dropdown"] li').first();
+        if (await boardOptions.count() > 0) {
+          const boardName = await boardOptions.innerText().catch(() => '알 수 없음');
+          await boardOptions.click();
           await page.waitForTimeout(500);
-          log(`  ✅ 게시판 선택 완료 (자유게시판)`);
+          log(`  ✅ 게시판 선택 완료 (${boardName.trim()})`);
+        } else {
+          // 폴백: 아무 li 요소나 첫 번째 선택
+          const fallbackOption = page.locator('li').first();
+          if (await fallbackOption.count() > 0) {
+            const boardName = await fallbackOption.innerText().catch(() => '알 수 없음');
+            await fallbackOption.click();
+            await page.waitForTimeout(500);
+            log(`  ✅ 게시판 선택 완료 - 폴백 (${boardName.trim()})`);
+          }
         }
       }
     } catch (e) {

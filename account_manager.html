@@ -250,12 +250,13 @@
               <th style="text-align:center;">⚡</th>
               <th>카페글</th>
               <th>블로그글</th>
+              <th>최근 리셋</th>
               <th>메모</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="accountsTable">
-            <tr><td colspan="11" class="loading">로딩 중...</td></tr>
+            <tr><td colspan="12" class="loading">로딩 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -265,6 +266,22 @@
   <script>
     // 페이지 로드 시 계정 목록 불러오기
     document.addEventListener('DOMContentLoaded', loadAccounts);
+
+    // 리셋 날짜 포맷
+    function formatResetDate(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const mins = String(date.getMinutes()).padStart(2, '0');
+      if (isToday) {
+        return `오늘 ${hours}:${mins}`;
+      }
+      return `${month}/${day} ${hours}:${mins}`;
+    }
 
     // 클립보드 복사
     function copyToClipboard(text) {
@@ -277,7 +294,7 @@
     // 계정 목록 로드
     async function loadAccounts() {
       const tbody = document.getElementById('accountsTable');
-      tbody.innerHTML = '<tr><td colspan="11" class="loading">로딩 중...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12" class="loading">로딩 중...</td></tr>';
 
       try {
         const res = await fetch('/api/accounts');
@@ -287,7 +304,7 @@
 
         const data = result.data;
         if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="11" class="loading">등록된 계정이 없습니다.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="12" class="loading">등록된 계정이 없습니다.</td></tr>';
           updateStats([]);
           return;
         }
@@ -296,7 +313,7 @@
           <tr data-id="${acc.id}">
             <td>${acc.id}</td>
             <td class="id-cell" onclick="loadAccountToForm(${acc.id})" title="클릭하여 수정">${acc.naver_id}</td>
-            <td class="pw-cell" onclick="togglePw(this, '${acc.naver_pw}')">••••••••</td>
+            <td class="pw-cell" onclick="copyToClipboard('${acc.naver_pw}')" title="클릭하여 복사">${acc.naver_pw}</td>
             <td>${acc.blog_id || '-'}</td>
             <td class="alias-cell" onclick="goToCafe('${acc.cafe_alias || ''}')" title="클릭하여 카페 이동">${acc.cafe_alias || '-'}</td>
             <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; cursor:pointer;" onclick="copyToClipboard('${acc.cafe_url || ''}')" title="클릭하여 복사">${acc.cafe_url ? '...' + acc.cafe_url.slice(-30) : '-'}</td>
@@ -315,6 +332,7 @@
                 ${acc.daily_blog_limit}
               </span>
             </td>
+            <td style="font-size:11px; color:#666;">${formatResetDate(acc.last_reset_date)}</td>
             <td>${acc.memo || '-'}</td>
             <td class="actions">
               ${acc.status === 'active'
@@ -333,7 +351,7 @@
 
       } catch (err) {
         showAlert('alertList', 'error', '로드 실패: ' + err.message);
-        tbody.innerHTML = '<tr><td colspan="11" class="loading">오류 발생</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="loading">오류 발생</td></tr>';
       }
     }
 
@@ -370,8 +388,8 @@
             blog_id: document.getElementById('blogId').value.trim() || naverId,
             cafe_url: document.getElementById('cafeUrl').value.trim(),
             cafe_alias: document.getElementById('cafeAlias').value.trim(),
-            daily_cafe_limit: parseInt(document.getElementById('dailyCafeLimit').value) || 150,
-            daily_blog_limit: parseInt(document.getElementById('dailyBlogLimit').value) ?? 5,
+            daily_cafe_limit: (v => isNaN(v) ? 150 : v)(parseInt(document.getElementById('dailyCafeLimit').value)),
+            daily_blog_limit: (v => isNaN(v) ? 5 : v)(parseInt(document.getElementById('dailyBlogLimit').value)),
             memo: document.getElementById('memo').value.trim()
           })
         });
@@ -509,7 +527,11 @@
         // 메모리 데이터도 업데이트 (테이블 새로고침 없이)
         if (window.accountsData) {
           const acc = window.accountsData.find(a => a.id == accountId);
-          if (acc) acc[field] = newValue;
+          if (acc) {
+            acc[field] = newValue;
+            // 통계 박스도 업데이트
+            updateStats(window.accountsData);
+          }
         }
 
       } catch (err) {
@@ -610,8 +632,8 @@
       document.getElementById('blogId').value = acc.blog_id || '';
       document.getElementById('cafeUrl').value = acc.cafe_url || '';
       document.getElementById('cafeAlias').value = acc.cafe_alias || '';
-      document.getElementById('dailyCafeLimit').value = acc.daily_cafe_limit || 150;
-      document.getElementById('dailyBlogLimit').value = acc.daily_blog_limit || 5;
+      document.getElementById('dailyCafeLimit').value = acc.daily_cafe_limit ?? 150;
+      document.getElementById('dailyBlogLimit').value = acc.daily_blog_limit ?? 5;
       document.getElementById('memo').value = acc.memo || '';
 
       // UI 변경 - 수정 모드
@@ -655,8 +677,8 @@
             blog_id: document.getElementById('blogId').value.trim() || null,
             cafe_url: document.getElementById('cafeUrl').value.trim() || null,
             cafe_alias: document.getElementById('cafeAlias').value.trim() || null,
-            daily_cafe_limit: parseInt(document.getElementById('dailyCafeLimit').value) || 150,
-            daily_blog_limit: parseInt(document.getElementById('dailyBlogLimit').value) || 5,
+            daily_cafe_limit: (v => isNaN(v) ? 150 : v)(parseInt(document.getElementById('dailyCafeLimit').value)),
+            daily_blog_limit: (v => isNaN(v) ? 5 : v)(parseInt(document.getElementById('dailyBlogLimit').value)),
             memo: document.getElementById('memo').value.trim() || null
           })
         });
