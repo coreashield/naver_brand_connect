@@ -1,9 +1,10 @@
 {
-  "version": "1.9.6",
+  "version": "1.10.0",
   "updated_at": "2025-01-19",
   "changes": [
-    "봇 감지 시 URL로 직접 재접속하여 상품정보 파싱",
-    "affiliate 경유 차단 → 직접 URL 접속으로 우회",
-    "재접속도 실패 시 URL만 저장"
+    "Enricher two-mode system: URL collection (Mode1) / Info parsing (Mode2)",
+    "Mode 1: Collect redirect URL only from affiliate link (for bot-blocked env)",
+    "Mode 2: Direct URL access for rating/brand parsing (for normal env)",
+    "enrich.bat mode selection menu added"
   ]
 }

@@ -505,6 +505,43 @@ export async function getProductsForEnrichment(limit = 100) {
 }
 
 /**
+ * [Mode 1] URL 수집 대상 상품 조회
+ * naver_shopping_url이 없는 상품 (affiliate_link로 URL만 수집)
+ */
+export async function getProductsForUrlCollection(limit = 100) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('status', 'ON')
+    .not('affiliate_link', 'is', null)
+    .is('naver_shopping_url', null)
+    .order('updated_at', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * [Mode 2] 상품정보 파싱 대상 조회
+ * naver_shopping_url은 있지만 rating/brand가 없는 상품
+ */
+export async function getProductsForInfoParsing(limit = 100) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('status', 'ON')
+    .not('naver_shopping_url', 'is', null)
+    .neq('naver_shopping_url', '')
+    .or('rating.is.null,brand.is.null')
+    .order('updated_at', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Enrichment 통계 조회
  */
 export async function getEnrichmentStats() {
@@ -769,6 +806,8 @@ export default {
   // Product Enrichment
   updateProductDetailInfo,
   getProductsForEnrichment,
+  getProductsForUrlCollection,
+  getProductsForInfoParsing,
   getEnrichmentStats,
   // Daily Issuance
   getExistingProductIds,

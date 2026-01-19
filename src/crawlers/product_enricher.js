@@ -1,13 +1,19 @@
 /**
  * 상품 정보 통합 보강 스크립트 (Product Enricher)
  *
- * affiliateLink를 통해 실제 스토어 페이지에 접속하여:
- * 1. naver_shopping_url 추출 (리다이렉트 URL)
- * 2. rating (평점) 추출
- * 3. review_count (리뷰 수) 추출
- * 4. brand (브랜드) 추출
+ * 두 가지 모드로 동작:
+ * [Mode 1] URL 수집 모드 (--mode=1)
+ *   - naver_shopping_url이 없는 상품 대상
+ *   - affiliateLink 접속 → 리다이렉트 URL만 수집
+ *   - 봇 차단 환경에서 사용 (URL만 저장)
  *
- * 사용법: node src/crawlers/product_enricher.js [--limit 100] [--headless]
+ * [Mode 2] 정보 파싱 모드 (--mode=2)
+ *   - naver_shopping_url은 있지만 rating/brand가 없는 상품 대상
+ *   - 저장된 URL로 직접 접속 → 상품정보 파싱
+ *   - 정상 환경에서 사용 (affiliate 경유 없이 직접 접속)
+ *
+ * 사용법: node src/crawlers/product_enricher.js --mode=1 [--limit 100] [--headless]
+ *         node src/crawlers/product_enricher.js --mode=2 [--limit 100] [--headless]
  */
 
 import { chromium } from 'playwright';
@@ -16,6 +22,8 @@ import {
   supabase,
   testConnection,
   getProductsForEnrichment,
+  getProductsForUrlCollection,
+  getProductsForInfoParsing,
   getEnrichmentStats,
   updateProductDetailInfo,
   deleteProduct
@@ -32,6 +40,9 @@ const BATCH_SIZE = parseInt(process.argv.find(a => a.startsWith('--limit='))?.sp
 const HEADLESS = process.argv.includes('--headless');
 const DELAY_BETWEEN_PRODUCTS = 2000;  // 상품 간 딜레이 (ms)
 const MAX_RETRIES = 2;
+
+// 모드 설정 (1: URL수집, 2: 정보파싱)
+const MODE = parseInt(process.argv.find(a => a.startsWith('--mode='))?.split('=')[1] || '0');
 
 function log(msg) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -110,12 +121,11 @@ async function createStealthContext(browser) {
 }
 
 /**
- * affiliateLink에서 상품 정보 추출
- * @returns {Object} { naverShoppingUrl, rating, reviewCount, brand, category, deleted }
+ * [Mode 1] affiliateLink에서 URL만 추출 (상품정보 파싱 안함)
  */
-async function extractProductInfo(page, affiliateLink) {
+async function extractUrlOnly(page, affiliateLink) {
   try {
-    // 1. affiliateLink 접속 (리다이렉트 대기)
+    // affiliateLink 접속 (리다이렉트 대기)
     await page.goto(affiliateLink, {
       waitUntil: 'domcontentloaded',
       timeout: 30000
@@ -126,7 +136,7 @@ async function extractProductInfo(page, affiliateLink) {
 
     let currentUrl = page.url();
 
-    // CAPTCHA 체크 (개선된 로직)
+    // CAPTCHA 체크
     const pageTitle = await page.title();
     const hasCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
                        await page.$('img[alt="캡차이미지"]') ||
@@ -136,11 +146,9 @@ async function extractProductInfo(page, affiliateLink) {
 
     if (hasCaptcha) {
       log('  ⚠️ CAPTCHA 감지됨 - 30초 대기 (수동 해결 필요)');
-      log('  📍 현재 URL: ' + currentUrl);
       await page.waitForTimeout(30000);
       currentUrl = page.url();
 
-      // CAPTCHA 해결 확인
       const stillCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
                            await page.$('img[alt="캡차이미지"]');
       if (stillCaptcha) {
@@ -153,84 +161,112 @@ async function extractProductInfo(page, affiliateLink) {
     // 페이지 상태 로그
     const finalTitle = await page.title();
     log('  📄 페이지 타이틀: ' + (finalTitle || '(없음)'));
-    log('  📍 최종 URL: ' + currentUrl);
-
-    // 삭제된 페이지 확인 (봇 감지와 구분 필요)
-    const pageContent = await page.content();
+    log('  📍 리다이렉트 URL: ' + currentUrl);
 
     // URL이 유효한 상품 페이지인지 확인
     const isValidProductUrl = (currentUrl.includes('smartstore.naver.com') ||
                                currentUrl.includes('brand.naver.com')) &&
                               currentUrl.includes('/products/');
 
-    // 삭제 패턴 체크
+    if (!isValidProductUrl) {
+      // 삭제된 상품인지 확인
+      const pageContent = await page.content();
+      const deletedPatterns = [
+        '삭제되었거나 존재하지 않는',
+        '판매종료된 상품',
+        '판매가 종료된'
+      ];
+      const isDeleted = deletedPatterns.some(pattern => pageContent.includes(pattern));
+
+      if (isDeleted) {
+        log('  ⚠️ 삭제/종료된 상품');
+        return { deleted: true };
+      }
+
+      log('  ⚠️ 유효하지 않은 URL - 스킵');
+      return { error: 'INVALID_URL' };
+    }
+
+    // 쿼리스트링 제거한 깨끗한 URL
+    const cleanUrl = currentUrl.split('?')[0];
+
+    return {
+      naverShoppingUrl: cleanUrl
+    };
+
+  } catch (error) {
+    log(`  추출 오류: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+/**
+ * [Mode 2] naver_shopping_url에서 상품정보 파싱
+ */
+async function parseProductInfo(page, naverShoppingUrl) {
+  try {
+    // 저장된 URL로 직접 접속
+    await page.goto(naverShoppingUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+
+    await page.waitForTimeout(3000);
+
+    const currentUrl = page.url();
+
+    // CAPTCHA 체크
+    const pageTitle = await page.title();
+    const hasCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
+                       await page.$('img[alt="캡차이미지"]') ||
+                       currentUrl.includes('captcha');
+
+    if (hasCaptcha) {
+      log('  ⚠️ CAPTCHA 감지됨 - 30초 대기 (수동 해결 필요)');
+      await page.waitForTimeout(30000);
+
+      const stillCaptcha = await page.$('text=보안 확인을 완료해 주세요');
+      if (stillCaptcha) {
+        log('  ❌ CAPTCHA 미해결 - 스킵');
+        return { error: 'CAPTCHA_TIMEOUT' };
+      }
+      log('  ✅ CAPTCHA 해결됨');
+    }
+
+    // 페이지 상태 로그
+    log('  📄 페이지 타이틀: ' + (pageTitle || '(없음)'));
+
+    // 삭제/차단 체크
+    const pageContent = await page.content();
     const deletedPatterns = [
       '삭제되었거나 존재하지 않는',
       '판매종료된 상품',
       '판매가 종료된'
     ];
-
-    // 봇 감지 패턴 (실제 삭제가 아닐 수 있음)
-    const botDetectionPatterns = [
+    const botPatterns = [
       '상품이 존재하지 않습니다',
       '존재하지 않는 페이지',
       '존재하지 않는 상품',
       '찾을 수 없습니다'
     ];
 
-    const isDefinitelyDeleted = deletedPatterns.some(pattern => pageContent.includes(pattern));
-    const isPossiblyBotBlocked = botDetectionPatterns.some(pattern => pageContent.includes(pattern));
-
-    // 확실한 삭제인 경우만 삭제 처리
-    if (isDefinitelyDeleted) {
-      log('  ⚠️ 삭제/종료 확인됨 (확실)');
+    const isDeleted = deletedPatterns.some(pattern => pageContent.includes(pattern));
+    if (isDeleted) {
+      log('  ⚠️ 삭제/종료된 상품');
       return { deleted: true };
     }
 
-    // 봇 감지로 추정되는 경우: URL은 정상인데 접근이 안됨 → URL로 직접 재접속
-    if (isPossiblyBotBlocked && isValidProductUrl) {
-      const cleanUrl = currentUrl.split('?')[0];
-      log('  🤖 봇 감지 추정 - URL로 직접 재접속 시도');
-      log('  🔄 재접속 URL: ' + cleanUrl);
-
-      // 저장된 URL로 직접 접속 (affiliate 경유 아님)
-      await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(3000);
-
-      // 재접속 후 상태 확인
-      const retryTitle = await page.title();
-      const retryContent = await page.content();
-      log('  📄 재접속 후 타이틀: ' + (retryTitle || '(없음)'));
-
-      // 재접속도 실패하면 URL만 저장
-      const stillBlocked = botDetectionPatterns.some(pattern => retryContent.includes(pattern));
-      if (stillBlocked) {
-        log('  ⚠️ 재접속도 차단됨 - URL만 저장');
-        return {
-          naverShoppingUrl: cleanUrl,
-          botBlocked: true
-        };
-      }
-
-      log('  ✅ 재접속 성공 - 상품정보 파싱 진행');
-      currentUrl = cleanUrl;
-      // 아래 파싱 로직으로 계속 진행
-    }
-
-    // URL도 이상하고 삭제 메시지도 있으면 삭제 처리
-    if (isPossiblyBotBlocked && !isValidProductUrl) {
-      log('  ⚠️ 삭제/종료 감지됨 (URL 비정상)');
-      return { deleted: true };
+    const isBotBlocked = botPatterns.some(pattern => pageContent.includes(pattern));
+    if (isBotBlocked) {
+      log('  ⚠️ 봇 차단 감지 - 스킵 (다른 환경에서 재시도 필요)');
+      return { error: 'BOT_BLOCKED' };
     }
 
     // 페이지 완전 로딩 대기
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    // 최종 URL (이게 naver_shopping_url)
-    const naverShoppingUrl = page.url();
-
-    // 2. 페이지에서 상세 정보 추출
+    // 상세 정보 추출
     const productInfo = await page.evaluate(() => {
       const result = {
         rating: null,
@@ -241,7 +277,6 @@ async function extractProductInfo(page, affiliateLink) {
       const bodyText = document.body.innerText;
 
       // === 평점 추출 ===
-      // 패턴: "평점 4.8", "4.8점", "★ 4.8"
       const ratingPatterns = [
         /평점\s*\n?\s*([\d.]+)/,
         /([\d.]+)\s*점/,
@@ -261,7 +296,6 @@ async function extractProductInfo(page, affiliateLink) {
       }
 
       // === 리뷰 수 추출 ===
-      // 패턴: "리뷰 1,234", "리뷰(1234)", "1,234개 리뷰"
       const reviewPatterns = [
         /리뷰\s*\(?\s*([\d,]+)\s*\)?/,
         /([\d,]+)\s*개?\s*리뷰/,
@@ -278,7 +312,6 @@ async function extractProductInfo(page, affiliateLink) {
       }
 
       // === 브랜드 추출 ===
-      // 패턴: "브랜드: 삼성", "브랜드 삼성"
       const brandPatterns = [
         /브랜드\s*[:：\t]?\s*([가-힣a-zA-Z0-9\s]+?)(?:\n|$|,|\/)/,
         /제조사\s*[:：\t]?\s*([가-힣a-zA-Z0-9\s]+?)(?:\n|$|,|\/)/,
@@ -305,26 +338,17 @@ async function extractProductInfo(page, affiliateLink) {
         }
       }
 
-      // 카테고리는 수집하지 않음 (페이지에서 구조화된 정보 없음)
-
       return result;
     });
 
-    // 유효한 naver_shopping_url인지 확인
-    const isValidUrl = naverShoppingUrl.includes('smartstore.naver.com') ||
-                       naverShoppingUrl.includes('brand.naver.com') ||
-                       naverShoppingUrl.includes('shopping.naver.com');
-
     return {
-      naverShoppingUrl: isValidUrl ? naverShoppingUrl : null,
       rating: productInfo.rating,
       reviewCount: productInfo.reviewCount,
-      brand: productInfo.brand,
-      category: productInfo.category
+      brand: productInfo.brand
     };
 
   } catch (error) {
-    log(`  추출 오류: ${error.message}`);
+    log(`  파싱 오류: ${error.message}`);
     return { error: error.message };
   }
 }
@@ -333,9 +357,27 @@ async function extractProductInfo(page, affiliateLink) {
  * 메인 실행 함수
  */
 async function main() {
+  // 모드 확인
+  if (MODE !== 1 && MODE !== 2) {
+    console.log('╔════════════════════════════════════════════════╗');
+    console.log('║   상품 정보 보강 스크립트 (Product Enricher)      ║');
+    console.log('╠════════════════════════════════════════════════╣');
+    console.log('║   사용법:                                        ║');
+    console.log('║   --mode=1  URL 수집 모드 (봇 차단 환경용)         ║');
+    console.log('║             → affiliate에서 URL만 수집            ║');
+    console.log('║   --mode=2  정보 파싱 모드 (정상 환경용)           ║');
+    console.log('║             → 저장된 URL에서 rating/brand 파싱    ║');
+    console.log('╚════════════════════════════════════════════════╝');
+    console.log('');
+    console.log('예시:');
+    console.log('  node src/crawlers/product_enricher.js --mode=1 --limit=100');
+    console.log('  node src/crawlers/product_enricher.js --mode=2 --limit=100 --headless');
+    process.exit(0);
+  }
+
+  const modeLabel = MODE === 1 ? 'URL 수집 모드' : '정보 파싱 모드';
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║   상품 정보 통합 보강 스크립트 (Product Enricher) ║');
-  console.log('║   naver_shopping_url + rating + brand 수집      ║');
+  console.log(`║   상품 정보 보강 - ${modeLabel}               ║`);
   console.log('╚════════════════════════════════════════════════╝\n');
 
   // DB 연결 테스트
@@ -372,15 +414,20 @@ async function main() {
   log(`   - rating: ${stats.withRating}개 (${Math.round(stats.withRating/stats.total*100)}%)`);
   log(`   - brand: ${stats.withBrand}개 (${Math.round(stats.withBrand/stats.total*100)}%)\n`);
 
-  // 보강 대상 상품 조회
-  const products = await getProductsForEnrichment(BATCH_SIZE);
-
-  if (products.length === 0) {
-    log('✅ 모든 상품이 이미 보강되었습니다!');
-    return;
+  // 모드에 따른 대상 상품 조회
+  let products;
+  if (MODE === 1) {
+    products = await getProductsForUrlCollection(BATCH_SIZE);
+    log(`📦 [Mode 1] URL 수집 대상: ${products.length}개 (naver_shopping_url 없는 상품)\n`);
+  } else {
+    products = await getProductsForInfoParsing(BATCH_SIZE);
+    log(`📦 [Mode 2] 정보 파싱 대상: ${products.length}개 (URL은 있지만 rating/brand 없는 상품)\n`);
   }
 
-  log(`📦 보강 대상: ${products.length}개 상품\n`);
+  if (products.length === 0) {
+    log('✅ 해당 모드의 보강 대상이 없습니다!');
+    return;
+  }
 
   // 브라우저 시작
   log(`브라우저 시작 (headless: ${HEADLESS})...`);
@@ -392,7 +439,7 @@ async function main() {
   const context = await createStealthContext(browser);
   const page = await context.newPage();
 
-  // 네이버 로그인
+  // 네이버 로그인 (Mode 1에서만 필요, Mode 2는 선택적)
   await naverLogin(page);
 
   // 통계
@@ -415,29 +462,53 @@ async function main() {
       const shortName = product.name.length > 30 ? product.name.substring(0, 30) + '...' : product.name;
       log(`\n[${totalProcessed}/${products.length}] ${shortName}`);
 
-      // affiliateLink 확인
-      if (!product.affiliate_link) {
-        log(`  ⚠️ affiliate_link 없음 - 스킵`);
-        totalSkipped++;
-        continue;
-      }
-
-      log(`  affiliate: ${product.affiliate_link}`);
-
       let info = null;
       let retries = 0;
 
-      // 재시도 로직
-      while (retries <= MAX_RETRIES && !info) {
-        info = await extractProductInfo(page, product.affiliate_link);
+      if (MODE === 1) {
+        // [Mode 1] URL 수집
+        if (!product.affiliate_link) {
+          log(`  ⚠️ affiliate_link 없음 - 스킵`);
+          totalSkipped++;
+          continue;
+        }
 
-        if (info.error && info.error !== 'CAPTCHA' && retries < MAX_RETRIES) {
-          retries++;
-          log(`  재시도 ${retries}/${MAX_RETRIES}...`);
-          await page.waitForTimeout(3000);
-          info = null;
-        } else {
-          break;
+        log(`  📎 affiliate: ${product.affiliate_link}`);
+
+        while (retries <= MAX_RETRIES && !info) {
+          info = await extractUrlOnly(page, product.affiliate_link);
+
+          if (info.error && info.error !== 'CAPTCHA_TIMEOUT' && retries < MAX_RETRIES) {
+            retries++;
+            log(`  재시도 ${retries}/${MAX_RETRIES}...`);
+            await page.waitForTimeout(3000);
+            info = null;
+          } else {
+            break;
+          }
+        }
+
+      } else {
+        // [Mode 2] 정보 파싱
+        if (!product.naver_shopping_url) {
+          log(`  ⚠️ naver_shopping_url 없음 - 스킵`);
+          totalSkipped++;
+          continue;
+        }
+
+        log(`  🔗 URL: ${product.naver_shopping_url}`);
+
+        while (retries <= MAX_RETRIES && !info) {
+          info = await parseProductInfo(page, product.naver_shopping_url);
+
+          if (info.error && info.error !== 'CAPTCHA_TIMEOUT' && info.error !== 'BOT_BLOCKED' && retries < MAX_RETRIES) {
+            retries++;
+            log(`  재시도 ${retries}/${MAX_RETRIES}...`);
+            await page.waitForTimeout(3000);
+            info = null;
+          } else {
+            break;
+          }
         }
       }
 
@@ -503,7 +574,7 @@ async function main() {
   const finalStats = await getEnrichmentStats();
 
   console.log('\n╔════════════════════════════════════════════════╗');
-  console.log('║   보강 완료!                                    ║');
+  console.log(`║   [${modeLabel}] 완료!                        ║`);
   console.log('╠════════════════════════════════════════════════╣');
   console.log(`║   처리: ${totalProcessed}개`);
   console.log(`║   성공: ${totalSuccess}개`);
@@ -512,9 +583,12 @@ async function main() {
   console.log(`║   스킵: ${totalSkipped}개`);
   console.log('╠════════════════════════════════════════════════╣');
   console.log(`║   이번 실행에서 추출:`);
-  console.log(`║   - naver_shopping_url: ${extractedNaverUrl}개`);
-  console.log(`║   - rating: ${extractedRating}개`);
-  console.log(`║   - brand: ${extractedBrand}개`);
+  if (MODE === 1) {
+    console.log(`║   - naver_shopping_url: ${extractedNaverUrl}개`);
+  } else {
+    console.log(`║   - rating: ${extractedRating}개`);
+    console.log(`║   - brand: ${extractedBrand}개`);
+  }
   console.log('╠════════════════════════════════════════════════╣');
   console.log(`║   최종 보유율 (전체 ${finalStats.total}개 기준):`);
   console.log(`║   - naver_shopping_url: ${Math.round(finalStats.withNaverUrl/finalStats.total*100)}%`);
