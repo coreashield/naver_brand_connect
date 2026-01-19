@@ -12,8 +12,8 @@ echo.
 cd /d "%~dp0"
 
 :: Node.js 경로 설정 (portable 버전 사용)
-set "NODE_PATH=%~dp0packages\node"
-set "PATH=%NODE_PATH%;%PATH%"
+set PATH=%~dp0node;%PATH%
+set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 
 :: 실행 옵션 선택
 echo [1] 100개 상품 보강 (기본)
