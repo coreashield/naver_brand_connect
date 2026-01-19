@@ -187,14 +187,34 @@ async function extractProductInfo(page, affiliateLink) {
       return { deleted: true };
     }
 
-    // 봇 감지로 추정되는 경우: URL은 정상인데 접근이 안됨 → URL만 저장하고 계속
+    // 봇 감지로 추정되는 경우: URL은 정상인데 접근이 안됨 → URL로 직접 재접속
     if (isPossiblyBotBlocked && isValidProductUrl) {
-      log('  🤖 봇 감지 추정 (URL 정상, 접근 차단)');
-      log('  💾 리다이렉트 URL 저장: ' + currentUrl.split('?')[0]);
-      return {
-        naverShoppingUrl: currentUrl.split('?')[0],  // 쿼리스트링 제거하고 저장
-        botBlocked: true
-      };
+      const cleanUrl = currentUrl.split('?')[0];
+      log('  🤖 봇 감지 추정 - URL로 직접 재접속 시도');
+      log('  🔄 재접속 URL: ' + cleanUrl);
+
+      // 저장된 URL로 직접 접속 (affiliate 경유 아님)
+      await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(3000);
+
+      // 재접속 후 상태 확인
+      const retryTitle = await page.title();
+      const retryContent = await page.content();
+      log('  📄 재접속 후 타이틀: ' + (retryTitle || '(없음)'));
+
+      // 재접속도 실패하면 URL만 저장
+      const stillBlocked = botDetectionPatterns.some(pattern => retryContent.includes(pattern));
+      if (stillBlocked) {
+        log('  ⚠️ 재접속도 차단됨 - URL만 저장');
+        return {
+          naverShoppingUrl: cleanUrl,
+          botBlocked: true
+        };
+      }
+
+      log('  ✅ 재접속 성공 - 상품정보 파싱 진행');
+      currentUrl = cleanUrl;
+      // 아래 파싱 로직으로 계속 진행
     }
 
     // URL도 이상하고 삭제 메시지도 있으면 삭제 처리
