@@ -1,7 +1,10 @@
 {
-  "version": "1.8.3",
-  "updated_at": "2025-01-16",
+  "version": "1.9.0",
+  "updated_at": "2025-01-19",
   "changes": [
-    "카페 게시판 선택 로직 개선 (첫 번째 게시판 자동 선택)"
+    "상품 정보 보강 스크립트 추가 (enrich.bat)",
+    "naver_shopping_url, rating, brand 자동 수집",
+    "Gemini 프롬프트에서 category 제거",
+    "계정 관리 UI 탭 필터링 추가"
   ]
 }

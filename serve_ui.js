@@ -60,13 +60,21 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // API: 계정 목록
+  // API: 계정 목록 (status 필터 지원)
   if (url.pathname === '/api/accounts' && req.method === 'GET') {
     try {
-      const { data, error } = await supabase
+      const statusFilter = url.searchParams.get('status'); // 'active', 'suspended', or null (all)
+
+      let query = supabase
         .from('naver_accounts')
-        .select('*')
-        .order('id');
+        .select('*');
+
+      // status 필터 적용
+      if (statusFilter && ['active', 'suspended'].includes(statusFilter)) {
+        query = query.eq('status', statusFilter);
+      }
+
+      const { data, error } = await query.order('id');
 
       if (error) throw error;
       jsonResponse(res, { success: true, data });

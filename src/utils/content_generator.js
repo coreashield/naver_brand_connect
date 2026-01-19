@@ -77,11 +77,11 @@ const WRITING_STYLES = {
 const INTRO_PATTERNS = [
   '안녕하세요, 오늘은 {product_keyword} 소개해드릴게요.',
   '{target_audience}분들 주목! 좋은 상품 소개해드려요.',
-  '요즘 {category} 찾고 계신 분들 많으시죠?',
+  '요즘 이런 상품 찾고 계신 분들 많으시죠?',
   '{product_keyword} 찾으셨다면 이 글 주목해주세요!',
-  '{season}에 딱 맞는 {category} 추천드릴게요.',
+  '{season}에 딱 맞는 상품 추천드릴게요.',
   '{product_keyword} 상품 정보 정리해봤어요.',
-  '{target_audience}를 위한 {category} 추천!',
+  '{target_audience}를 위한 추천 상품!',
   '많은 분들이 찾으시는 {product_keyword} 소개합니다.',
 ];
 
@@ -112,7 +112,6 @@ function buildPrompt(productInfo, style, platform = 'blog') {
   // 기본값 설정
   const name = productInfo.name || '추천 상품';
   const keywords = productInfo.keywords || [];
-  const category = productInfo.category?.split('>').pop()?.trim() || '생활용품';
   const brand = productInfo.brand || productInfo.manufacturer || '';
   const price = productInfo.price ? `${productInfo.price.toLocaleString()}원` : '';
   const originalPrice = productInfo.originalPrice ? `${productInfo.originalPrice.toLocaleString()}원` : '';
@@ -141,7 +140,6 @@ function buildPrompt(productInfo, style, platform = 'blog') {
 
 ## 상품 정보
 - 상품명: ${name}
-- 카테고리: ${category}
 ${brand ? `- 브랜드: ${brand}` : ''}
 ${discountInfo ? `- 가격: ${discountInfo}` : ''}
 ${ratingInfo ? `- 평가: ${ratingInfo}` : ''}

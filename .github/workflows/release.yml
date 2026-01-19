@@ -66,7 +66,7 @@ jobs:
       - name: Copy source files
         shell: pwsh
         run: |
-          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat")
+          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat","enrich.bat")
           foreach ($item in $include) {
             if (Test-Path $item) {
               if ((Get-Item $item).PSIsContainer) {
@@ -123,6 +123,7 @@ jobs:
             - 카페글쓰기.bat
             - 블로그글쓰기.bat
             - 상품정보업데이트.bat
+            - enrich.bat (상품 정보 보강 - rating/brand/naver_url 수집)
 
             ### 포함 내용
             - Portable Node.js 20.11.0

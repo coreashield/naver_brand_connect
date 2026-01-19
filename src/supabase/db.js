@@ -447,6 +447,99 @@ export async function deleteProduct(productId) {
   if (error) throw error;
 }
 
+/**
+ * 상품 상세 정보 업데이트 (naver_shopping_url + rating/brand/category)
+ * @param {string} productId - 상품 ID
+ * @param {Object} info - 업데이트할 정보
+ */
+export async function updateProductDetailInfo(productId, info) {
+  const updateData = {
+    updated_at: new Date().toISOString()
+  };
+
+  // naver_shopping_url
+  if (info.naverShoppingUrl !== undefined) {
+    updateData.naver_shopping_url = info.naverShoppingUrl;
+  }
+
+  // rating (float)
+  if (info.rating !== undefined && info.rating !== null) {
+    updateData.rating = parseFloat(info.rating);
+  }
+
+  // review_count (int)
+  if (info.reviewCount !== undefined && info.reviewCount !== null) {
+    updateData.review_count = parseInt(info.reviewCount);
+  }
+
+  // brand (string)
+  if (info.brand !== undefined && info.brand !== null) {
+    updateData.brand = info.brand;
+  }
+
+
+  const { error } = await supabase
+    .from('products')
+    .update(updateData)
+    .eq('product_id', productId);
+
+  if (error) throw error;
+}
+
+/**
+ * 상세 정보가 없는 상품 조회 (enrichment 대상)
+ * naver_shopping_url이 없거나, rating/brand가 비어있는 상품
+ */
+export async function getProductsForEnrichment(limit = 100) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('status', 'ON')
+    .not('affiliate_link', 'is', null)
+    .or('naver_shopping_url.is.null,rating.is.null,brand.is.null')
+    .order('updated_at', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Enrichment 통계 조회
+ */
+export async function getEnrichmentStats() {
+  const { count: total } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON');
+
+  const { count: withNaverUrl } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON')
+    .not('naver_shopping_url', 'is', null)
+    .neq('naver_shopping_url', '');
+
+  const { count: withRating } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON')
+    .not('rating', 'is', null);
+
+  const { count: withBrand } = await supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ON')
+    .not('brand', 'is', null);
+
+  return {
+    total: total || 0,
+    withNaverUrl: withNaverUrl || 0,
+    withRating: withRating || 0,
+    withBrand: withBrand || 0
+  };
+}
+
 // ==================== Daily Issuance (일일 발급 추적) ====================
 
 /**
@@ -673,6 +766,10 @@ export default {
   getProductsWithoutNaverUrl,
   getNaverUrlStats,
   deleteProduct,
+  // Product Enrichment
+  updateProductDetailInfo,
+  getProductsForEnrichment,
+  getEnrichmentStats,
   // Daily Issuance
   getExistingProductIds,
   getTodayIssuanceCount,
