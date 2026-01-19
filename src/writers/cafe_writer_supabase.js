@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import http from 'http';
+import readline from 'readline';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateContent, getRandomStyle, WRITING_STYLES } from '../utils/content_generator.js';
 import {
@@ -52,6 +53,23 @@ function log(message) {
   try {
     fs.appendFileSync(LOG_FILE, logMessage + '\n', 'utf-8');
   } catch (e) {}
+}
+
+/**
+ * CAPTCHA 해결 대기 (엔터키 입력 대기)
+ */
+async function waitForEnter(message = 'CAPTCHA를 해결한 후 엔터키를 누르세요...') {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`\n⚠️  ${message}\n>> `, () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
 
 function ensureDir(dir) {
@@ -128,24 +146,10 @@ async function getSmartStoreImages(page, storeUrl) {
     );
 
     if (hasCaptcha) {
-      log(`  ⚠️ CAPTCHA 감지됨 - 수동으로 풀어주세요 (60초 대기)...`);
-      for (let i = 0; i < 12; i++) {
-        await productPage.waitForTimeout(5000);
-        const stillCaptcha = await productPage.evaluate(() =>
-          document.body.innerText.includes('보안 확인') ||
-          document.body.innerText.includes('캡차')
-        );
-        if (!stillCaptcha) {
-          log(`  ✅ CAPTCHA 해결됨! 계속 진행...`);
-          await productPage.waitForTimeout(2000);
-          break;
-        }
-        if (i === 11) {
-          log(`  ❌ CAPTCHA 대기 시간 초과`);
-          await productPage.close();
-          return imageUrls;
-        }
-      }
+      log(`  ⚠️ CAPTCHA 감지됨`);
+      await waitForEnter('CAPTCHA를 해결한 후 엔터키를 누르세요...');
+      log(`  ✅ CAPTCHA 해결됨!`);
+      await productPage.waitForTimeout(2000);
     }
 
     const mainImages = await productPage.$$eval('img', imgs => {
@@ -873,8 +877,17 @@ async function main() {
     await page.keyboard.type(account.naver_id, { delay: 50 });
     await page.click('#pw');
     await page.keyboard.type(account.naver_pw, { delay: 50 });
-    await page.click('#log\\.login');
+    await page.keyboard.press('Enter');
     await page.waitForTimeout(5000);
+
+    // CAPTCHA 감지
+    const currentUrl = page.url();
+    if (currentUrl.includes('nidlogin') || currentUrl.includes('captcha')) {
+      log('⚠️ 로그인 CAPTCHA 감지됨');
+      await waitForEnter('CAPTCHA를 해결한 후 엔터키를 누르세요...');
+      await page.waitForTimeout(2000);
+    }
+
     log('로그인 완료\n');
   }
 

@@ -78,7 +78,7 @@ if "%MODE%"=="1" (
 ) else (
     echo [Mode 2] 정보 파싱 모드로 %LIMIT%개 상품 보강을 시작합니다...
 )
-echo CAPTCHA가 나타나면 30초 내에 수동으로 해결해주세요.
+echo CAPTCHA가 나타나면 해결 후 엔터키를 누르세요.
 echo.
 
 :: 실행

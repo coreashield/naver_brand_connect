@@ -1,9 +1,9 @@
 {
-  "version": "1.11.0",
+  "version": "1.12.0",
   "updated_at": "2025-01-19",
   "changes": [
-    "CAPTCHA detection: wait for Enter key instead of fixed 30s timeout",
-    "Cleaned 362 URLs with query strings (removed ?NaPm=... parameters)",
-    "Enricher two-mode system: URL collection (Mode1) / Info parsing (Mode2)"
+    "All writer scripts: CAPTCHA Enter key wait mode",
+    "auto_writer.js, cafe_writer_supabase.js, blog_writer_supabase.js updated",
+    "Login CAPTCHA + product page CAPTCHA now wait for Enter key"
   ]
 }
