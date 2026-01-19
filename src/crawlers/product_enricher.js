@@ -151,9 +151,8 @@ async function extractProductInfo(page, affiliateLink) {
     }
 
     // 페이지 상태 로그
-    const pageTitle = await page.title();
-    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
-    log('  📄 페이지 타이틀: ' + (pageTitle || '(없음)'));
+    const finalTitle = await page.title();
+    log('  📄 페이지 타이틀: ' + (finalTitle || '(없음)'));
     log('  📍 최종 URL: ' + currentUrl);
 
     // 삭제된 페이지 확인 (구체적인 문구로 체크)
