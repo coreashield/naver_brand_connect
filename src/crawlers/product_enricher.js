@@ -126,19 +126,28 @@ async function extractProductInfo(page, affiliateLink) {
 
     let currentUrl = page.url();
 
-    // CAPTCHA 체크
-    const hasCaptcha = await page.$('text=보안 확인') ||
-                       await page.$('text=캡차') ||
+    // CAPTCHA 체크 (개선된 로직)
+    const pageTitle = await page.title();
+    const hasCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
+                       await page.$('img[alt="캡차이미지"]') ||
+                       await page.$('input[placeholder="정답을 입력해주세요"]') ||
+                       pageTitle === '' ||
                        currentUrl.includes('captcha');
 
     if (hasCaptcha) {
-      log('  ⚠️ CAPTCHA 감지됨 - 30초 대기');
+      log('  ⚠️ CAPTCHA 감지됨 - 30초 대기 (수동 해결 필요)');
+      log('  📍 현재 URL: ' + currentUrl);
       await page.waitForTimeout(30000);
       currentUrl = page.url();
 
-      if (currentUrl.includes('captcha') || await page.$('text=보안 확인')) {
-        return { error: 'CAPTCHA' };
+      // CAPTCHA 해결 확인
+      const stillCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
+                           await page.$('img[alt="캡차이미지"]');
+      if (stillCaptcha) {
+        log('  ❌ CAPTCHA 미해결 - 스킵');
+        return { error: 'CAPTCHA_TIMEOUT' };
       }
+      log('  ✅ CAPTCHA 해결됨');
     }
 
     // 삭제된 페이지 확인

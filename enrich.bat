@@ -15,6 +15,14 @@ cd /d "%~dp0"
 set PATH=%~dp0node;%PATH%
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 
+:: 환경 정보 출력
+echo [환경 정보]
+echo   실행 경로: %~dp0
+echo   Node 경로: %~dp0node
+echo   브라우저: %PLAYWRIGHT_BROWSERS_PATH%
+node --version 2>nul || echo   Node.js를 찾을 수 없습니다!
+echo.
+
 :: 실행 옵션 선택
 echo [1] 100개 상품 보강 (기본)
 echo [2] 500개 상품 보강

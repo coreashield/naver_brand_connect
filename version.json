@@ -1,8 +1,8 @@
 {
-  "version": "1.9.1",
+  "version": "1.9.2",
   "updated_at": "2025-01-19",
   "changes": [
-    "enrich.bat 노드 경로 수정",
-    ".env.sample 배포 포함"
+    "CAPTCHA 감지 로직 개선 (삭제된 상품 오판 수정)",
+    "enrich.bat 환경 정보 로그 추가"
   ]
 }
