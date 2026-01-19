@@ -1,10 +1,8 @@
 {
-  "version": "1.9.0",
+  "version": "1.9.1",
   "updated_at": "2025-01-19",
   "changes": [
-    "상품 정보 보강 스크립트 추가 (enrich.bat)",
-    "naver_shopping_url, rating, brand 자동 수집",
-    "Gemini 프롬프트에서 category 제거",
-    "계정 관리 UI 탭 필터링 추가"
+    "enrich.bat 노드 경로 수정",
+    ".env.sample 배포 포함"
   ]
 }
