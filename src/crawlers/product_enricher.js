@@ -435,15 +435,25 @@ async function main() {
     return;
   }
 
-  // 브라우저 시작
-  log(`브라우저 시작 (headless: ${HEADLESS})...`);
-  const browser = await chromium.launch({
+  // 브라우저 시작 (persistent context로 쿠키/세션 유지)
+  log(`브라우저 시작 (headless: ${HEADLESS}, persistent context)...`);
+  const context = await chromium.launchPersistentContext('./playwright-data', {
     headless: HEADLESS,
-    slowMo: 50
+    slowMo: 50,
+    args: [
+      '--disable-blink-features=AutomationControlled'
+    ],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: { width: 1920, height: 1080 },
+    locale: 'ko-KR'
   });
 
-  const context = await createStealthContext(browser);
   const page = await context.newPage();
+
+  // navigator.webdriver 숨기기
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
 
   // 네이버 로그인 (Mode 1에서만 필요, Mode 2는 선택적)
   await naverLogin(page);
@@ -573,7 +583,7 @@ async function main() {
     log(`\n❌ 오류 발생: ${error.message}`);
     console.error(error);
   } finally {
-    await browser.close();
+    await context.close();
   }
 
   // 최종 통계

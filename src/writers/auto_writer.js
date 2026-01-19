@@ -21,7 +21,8 @@ import {
   testConnection,
   getAccountById,
   incrementAccountCount,
-  setAccountCountToLimit
+  setAccountCountToLimit,
+  updateProductDetailInfo
 } from '../supabase/db.js';
 
 dotenv.config();
@@ -130,9 +131,11 @@ async function getRedirectUrl(page, shortUrl) {
   }
 }
 
-// 스마트스토어 이미지 수집
-async function getSmartStoreImages(page, storeUrl) {
+// 스마트스토어 이미지 + 상품정보 수집
+async function getSmartStoreImages(page, storeUrl, productId = null) {
   const imageUrls = [];
+  let productInfo = { rating: null, reviewCount: null, brand: null };
+
   try {
     const productPage = await page.context().newPage();
     await productPage.goto(storeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -150,6 +153,7 @@ async function getSmartStoreImages(page, storeUrl) {
       await productPage.waitForTimeout(2000);
     }
 
+    // 이미지 수집
     const mainImages = await productPage.$$eval('img', imgs => {
       return imgs
         .map(img => ({ src: img.src || img.getAttribute('data-src') || '' }))
@@ -160,19 +164,113 @@ async function getSmartStoreImages(page, storeUrl) {
         .filter((src, idx, arr) => arr.indexOf(src) === idx)
         .slice(0, 10);
     });
-
     imageUrls.push(...mainImages);
+
+    // 상품 정보 수집 (rating, reviewCount, brand)
+    try {
+      productInfo = await productPage.evaluate(() => {
+        const info = { rating: null, reviewCount: null, brand: null };
+        const bodyText = document.body.innerText;
+
+        // Rating 추출 - 텍스트 패턴 기반 (더 안정적)
+        // 패턴: "평점 4.83" 또는 "4.83점"
+        const ratingPatterns = [
+          /평점\s*(\d+\.?\d*)/,        // "평점 4.83"
+          /(\d+\.\d+)\s*점/,           // "4.83점"
+          /별점[:\s]*(\d+\.?\d*)/,     // "별점: 4.83"
+          /(\d\.\d{1,2})\s*\(/         // "4.83(" - 괄호 앞의 숫자
+        ];
+        for (const pattern of ratingPatterns) {
+          const match = bodyText.match(pattern);
+          if (match && parseFloat(match[1]) <= 5 && parseFloat(match[1]) >= 1) {
+            info.rating = parseFloat(match[1]);
+            break;
+          }
+        }
+
+        // Review count 추출 - 텍스트 패턴 기반
+        // 패턴: "9,719리뷰" 또는 "리뷰 9,719"
+        const reviewPatterns = [
+          /([\d,]+)\s*리뷰/,            // "9,719리뷰"
+          /리뷰\s*([\d,]+)/,            // "리뷰 9,719"
+          /([\d,]+)\s*개의?\s*리뷰/,    // "9,719개의 리뷰"
+          /후기\s*([\d,]+)/             // "후기 9,719"
+        ];
+        for (const pattern of reviewPatterns) {
+          const match = bodyText.match(pattern);
+          if (match) {
+            info.reviewCount = parseInt(match[1].replace(/,/g, ''));
+            break;
+          }
+        }
+
+        // Brand 추출 - URL에서 추출 시도 (brand.naver.com/{brandname}/products/...)
+        const urlMatch = window.location.href.match(/brand\.naver\.com\/([^\/]+)\/products/);
+        if (urlMatch && urlMatch[1]) {
+          info.brand = urlMatch[1]; // URL 기반 브랜드명 (영문/숫자)
+        }
+
+        // Brand 추출 - 셀렉터 기반 (URL에서 못 찾은 경우)
+        if (!info.brand) {
+          const brandSelectors = [
+            '[class*="brand_name"]',
+            '.brand_title',
+            '[class*="store_name"] a'
+          ];
+          const excludePatterns = ['네이버', 'NAVER', 'naver', '스토어', 'store', '브랜드스토어'];
+          for (const sel of brandSelectors) {
+            try {
+              const el = document.querySelector(sel);
+              if (el && el.textContent) {
+                const text = el.textContent.trim();
+                const isExcluded = excludePatterns.some(p => text.includes(p));
+                if (!isExcluded && text.length > 0 && text.length < 50) {
+                  info.brand = text;
+                  break;
+                }
+              }
+            } catch (e) {}
+          }
+        }
+
+        // Brand - 페이지 타이틀에서 추출 시도 (": 브랜드명" 패턴)
+        if (!info.brand) {
+          const title = document.title;
+          const titleMatch = title.match(/:\s*([^:]+)$/);
+          if (titleMatch) {
+            const candidate = titleMatch[1].trim();
+            const excludePatterns = ['네이버', 'NAVER', 'naver', '스토어', 'store'];
+            const isExcluded = excludePatterns.some(p => candidate.includes(p));
+            if (!isExcluded && candidate.length > 0 && candidate.length < 30) {
+              info.brand = candidate;
+            }
+          }
+        }
+
+        return info;
+      });
+
+      // DB 업데이트 (productId가 있고 정보가 있을 때)
+      if (productId && (productInfo.rating || productInfo.brand)) {
+        log(`  📊 상품정보 추출: rating=${productInfo.rating}, brand=${productInfo.brand}`);
+      }
+    } catch (e) {
+      // 정보 추출 실패해도 이미지 수집은 계속
+    }
+
     await productPage.close();
   } catch (e) {
     log(`  스마트스토어 이미지 수집 오류: ${e.message}`);
   }
-  return imageUrls;
+
+  return { imageUrls, productInfo };
 }
 
 // 상품 이미지 가져오기
 async function getProductImages(page, product, platform) {
   const images = [];
   let imageUrls = [];
+  let collectedInfo = null;
   const maxImages = platform === 'cafe' ? CAFE_MAX_IMAGES : BLOG_MAX_IMAGES;
   const minImages = platform === 'cafe' ? CAFE_MIN_IMAGES : BLOG_MIN_IMAGES;
   const skipCount = platform === 'cafe' ? CAFE_SKIP_COUNT : 1;
@@ -183,14 +281,31 @@ async function getProductImages(page, product, platform) {
 
     if (naverShoppingUrl) {
       log(`  naver_shopping_url 사용...`);
-      imageUrls = await getSmartStoreImages(page, naverShoppingUrl);
+      const result = await getSmartStoreImages(page, naverShoppingUrl, product.product_id);
+      imageUrls = result.imageUrls;
+      collectedInfo = result.productInfo;
     }
 
     if (imageUrls.length === 0 && affiliateLink && affiliateLink.includes('naver.me')) {
       log(`  affiliateLink 폴백 사용...`);
       const realUrl = await getRedirectUrl(page, affiliateLink);
       if (realUrl && (realUrl.includes('smartstore') || realUrl.includes('shopping.naver') || realUrl.includes('brand.naver.com'))) {
-        imageUrls = await getSmartStoreImages(page, realUrl);
+        const result = await getSmartStoreImages(page, realUrl, product.product_id);
+        imageUrls = result.imageUrls;
+        collectedInfo = result.productInfo;
+      }
+    }
+
+    // 수집된 상품 정보를 DB에 업데이트 (rating 또는 brand가 없는 경우에만)
+    if (collectedInfo && (collectedInfo.rating || collectedInfo.brand)) {
+      const needsUpdate = !product.rating || !product.brand;
+      if (needsUpdate) {
+        try {
+          await updateProductDetailInfo(product.product_id, collectedInfo);
+          log(`  💾 상품정보 DB 저장 완료`);
+        } catch (e) {
+          log(`  ⚠️ 상품정보 DB 저장 실패: ${e.message}`);
+        }
       }
     }
 
