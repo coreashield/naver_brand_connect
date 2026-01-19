@@ -155,21 +155,51 @@ async function extractProductInfo(page, affiliateLink) {
     log('  📄 페이지 타이틀: ' + (finalTitle || '(없음)'));
     log('  📍 최종 URL: ' + currentUrl);
 
-    // 삭제된 페이지 확인 (구체적인 문구로 체크)
+    // 삭제된 페이지 확인 (봇 감지와 구분 필요)
     const pageContent = await page.content();
+
+    // URL이 유효한 상품 페이지인지 확인
+    const isValidProductUrl = (currentUrl.includes('smartstore.naver.com') ||
+                               currentUrl.includes('brand.naver.com')) &&
+                              currentUrl.includes('/products/');
+
+    // 삭제 패턴 체크
     const deletedPatterns = [
       '삭제되었거나 존재하지 않는',
+      '판매종료된 상품',
+      '판매가 종료된'
+    ];
+
+    // 봇 감지 패턴 (실제 삭제가 아닐 수 있음)
+    const botDetectionPatterns = [
+      '상품이 존재하지 않습니다',
       '존재하지 않는 페이지',
       '존재하지 않는 상품',
-      '판매종료된 상품',
-      '판매가 종료된',
-      '상품이 없습니다',
       '찾을 수 없습니다'
     ];
 
-    const isDeleted = deletedPatterns.some(pattern => pageContent.includes(pattern));
-    if (isDeleted) {
-      log('  ⚠️ 삭제/종료 감지됨');
+    const isDefinitelyDeleted = deletedPatterns.some(pattern => pageContent.includes(pattern));
+    const isPossiblyBotBlocked = botDetectionPatterns.some(pattern => pageContent.includes(pattern));
+
+    // 확실한 삭제인 경우만 삭제 처리
+    if (isDefinitelyDeleted) {
+      log('  ⚠️ 삭제/종료 확인됨 (확실)');
+      return { deleted: true };
+    }
+
+    // 봇 감지로 추정되는 경우: URL은 정상인데 접근이 안됨 → URL만 저장하고 계속
+    if (isPossiblyBotBlocked && isValidProductUrl) {
+      log('  🤖 봇 감지 추정 (URL 정상, 접근 차단)');
+      log('  💾 리다이렉트 URL 저장: ' + currentUrl.split('?')[0]);
+      return {
+        naverShoppingUrl: currentUrl.split('?')[0],  // 쿼리스트링 제거하고 저장
+        botBlocked: true
+      };
+    }
+
+    // URL도 이상하고 삭제 메시지도 있으면 삭제 처리
+    if (isPossiblyBotBlocked && !isValidProductUrl) {
+      log('  ⚠️ 삭제/종료 감지됨 (URL 비정상)');
       return { deleted: true };
     }
 
