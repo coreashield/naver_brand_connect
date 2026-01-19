@@ -66,7 +66,7 @@ jobs:
       - name: Copy source files
         shell: pwsh
         run: |
-          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat","enrich.bat")
+          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat","enrich.bat",".env.sample")
           foreach ($item in $include) {
             if (Test-Path $item) {
               if ((Get-Item $item).PSIsContainer) {
@@ -79,8 +79,9 @@ jobs:
           }
           Copy-Item -Path "node_modules" -Destination "package/node_modules" -Recurse
           New-Item -ItemType Directory -Force -Path "package/output"
-          $envContent = "SUPABASE_URL=https://your-project.supabase.co`nSUPABASE_SERVICE_KEY=your-key`nGEMINI_API_KEY=your-key`nACCOUNT_ID=1`nWORKER_NAME=worker-1`nHEADLESS=false"
-          $envContent | Out-File -FilePath "package/.env.example" -Encoding UTF8
+          if (Test-Path "package/.env.sample") {
+            Copy-Item -Path "package/.env.sample" -Destination "package/.env.example"
+          }
 
       - name: Create batch files
         shell: pwsh
