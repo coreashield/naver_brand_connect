@@ -18,6 +18,7 @@
 
 import { chromium } from 'playwright';
 import dotenv from 'dotenv';
+import readline from 'readline';
 import {
   supabase,
   testConnection,
@@ -30,6 +31,23 @@ import {
 } from '../supabase/db.js';
 
 dotenv.config();
+
+/**
+ * CAPTCHA 해결 대기 (엔터키 입력 대기)
+ */
+async function waitForEnter(message = 'CAPTCHA를 해결한 후 엔터키를 누르세요...') {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`\n⚠️  ${message}\n>> `, () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
 
 // 계정 정보는 DB에서 가져옴
 let NAVER_ID = null;
@@ -72,14 +90,14 @@ async function naverLogin(page) {
   // 로그인 확인 (CAPTCHA 대기)
   const currentUrl = page.url();
   if (currentUrl.includes('nidlogin') || currentUrl.includes('captcha')) {
-    log('⚠️ 로그인 CAPTCHA 감지 - 30초 대기 (수동 해결 필요)');
-    await page.waitForTimeout(30000);
+    log('⚠️ 로그인 CAPTCHA 감지됨');
+    await waitForEnter('CAPTCHA를 해결한 후 엔터키를 누르세요...');
   }
 
   // 2차 인증 체크
   if (page.url().includes('nidlogin')) {
-    log('⚠️ 추가 인증 필요 - 30초 대기');
-    await page.waitForTimeout(30000);
+    log('⚠️ 추가 인증 필요');
+    await waitForEnter('추가 인증을 완료한 후 엔터키를 누르세요...');
   }
 
   log('✅ 로그인 완료');
@@ -145,16 +163,9 @@ async function extractUrlOnly(page, affiliateLink) {
                        currentUrl.includes('captcha');
 
     if (hasCaptcha) {
-      log('  ⚠️ CAPTCHA 감지됨 - 30초 대기 (수동 해결 필요)');
-      await page.waitForTimeout(30000);
+      log('  ⚠️ CAPTCHA 감지됨');
+      await waitForEnter('CAPTCHA를 해결한 후 엔터키를 누르세요...');
       currentUrl = page.url();
-
-      const stillCaptcha = await page.$('text=보안 확인을 완료해 주세요') ||
-                           await page.$('img[alt="캡차이미지"]');
-      if (stillCaptcha) {
-        log('  ❌ CAPTCHA 미해결 - 스킵');
-        return { error: 'CAPTCHA_TIMEOUT' };
-      }
       log('  ✅ CAPTCHA 해결됨');
     }
 
@@ -222,19 +233,14 @@ async function parseProductInfo(page, naverShoppingUrl) {
                        currentUrl.includes('captcha');
 
     if (hasCaptcha) {
-      log('  ⚠️ CAPTCHA 감지됨 - 30초 대기 (수동 해결 필요)');
-      await page.waitForTimeout(30000);
-
-      const stillCaptcha = await page.$('text=보안 확인을 완료해 주세요');
-      if (stillCaptcha) {
-        log('  ❌ CAPTCHA 미해결 - 스킵');
-        return { error: 'CAPTCHA_TIMEOUT' };
-      }
+      log('  ⚠️ CAPTCHA 감지됨');
+      await waitForEnter('CAPTCHA를 해결한 후 엔터키를 누르세요...');
       log('  ✅ CAPTCHA 해결됨');
     }
 
-    // 페이지 상태 로그
-    log('  📄 페이지 타이틀: ' + (pageTitle || '(없음)'));
+    // 페이지 상태 로그 (CAPTCHA 해결 후 다시 확인)
+    const finalTitle = await page.title();
+    log('  📄 페이지 타이틀: ' + (finalTitle || '(없음)'));
 
     // 삭제/차단 체크
     const pageContent = await page.content();

@@ -1,10 +1,9 @@
 {
-  "version": "1.10.0",
+  "version": "1.11.0",
   "updated_at": "2025-01-19",
   "changes": [
-    "Enricher two-mode system: URL collection (Mode1) / Info parsing (Mode2)",
-    "Mode 1: Collect redirect URL only from affiliate link (for bot-blocked env)",
-    "Mode 2: Direct URL access for rating/brand parsing (for normal env)",
-    "enrich.bat mode selection menu added"
+    "CAPTCHA detection: wait for Enter key instead of fixed 30s timeout",
+    "Cleaned 362 URLs with query strings (removed ?NaPm=... parameters)",
+    "Enricher two-mode system: URL collection (Mode1) / Info parsing (Mode2)"
   ]
 }

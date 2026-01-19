@@ -130,7 +130,8 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "mcp__serena__think_about_task_adherence",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(gh run watch:*)"
     ]
   }
 }
