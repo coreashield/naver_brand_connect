@@ -1,10 +1,11 @@
 {
-  "version": "1.13.0",
-  "updated_at": "2025-01-19",
+  "version": "1.14.0",
+  "updated_at": "2026-01-19",
   "changes": [
-    "auto_writer: Product info enrichment integrated",
-    "Rating/reviewCount/brand extraction during image collection",
-    "Supports both smartstore.naver.com and brand.naver.com URLs",
-    "Automatic DB update when product info is extracted"
+    "daily_link_issuer v3: Added Phase 2 affiliate_link collection",
+    "Phase 1: Round-robin link issuance across categories",
+    "Phase 2: Collect affiliate_link from issued links management page",
+    "Phase 3: Extract naver_shopping_url from product pages",
+    "Products now have complete affiliate_link for posting"
   ]
 }

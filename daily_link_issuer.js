@@ -1,8 +1,9 @@
 /**
- * Daily Link Issuer - 일일 1000개 링크 발급 스크립트 (v2)
+ * Daily Link Issuer - 일일 1000개 링크 발급 스크립트 (v3)
  *
  * Phase 1: 라운드 로빈 방식으로 모든 카테고리에서 균등하게 링크 발급
- * Phase 2: 발급된 상품들의 naver_shopping_url 일괄 추출
+ * Phase 2: 발급 링크 관리 페이지에서 affiliate_link 수집
+ * Phase 3: 발급된 상품들의 naver_shopping_url 일괄 추출
  *
  * 사용법: node daily_link_issuer.js
  */
@@ -19,17 +20,22 @@ import {
   getProductCount,
   getProductsWithoutNaverUrl,
   updateNaverShoppingUrl,
+  updateAffiliateLink,
   getAccountById
 } from './src/supabase/db.js';
 
 dotenv.config();
 
 // 계정 정보 (DB에서 로드)
+// ⚠️ 중요: 캠페인 ID 904249244338784는 계정 1 (ingredient7303126)에 연결됨
+// 다른 계정으로 실행 시 "접근 권한이 없습니다" 오류 발생
 const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
 let account = null;
 
-// URLs
-const CATEGORY_URL = 'https://brandconnect.naver.com/904249244338784/affiliate/products/category';
+// URLs (캠페인 ID는 계정 1 전용)
+const CAMPAIGN_ID = '904249244338784';
+const CATEGORY_URL = `https://brandconnect.naver.com/${CAMPAIGN_ID}/affiliate/products/category`;
+const LINKS_URL = `https://brandconnect.naver.com/${CAMPAIGN_ID}/affiliate/products-link?persist=true`;
 
 // 카테고리 목록
 const CATEGORIES = [
@@ -334,11 +340,139 @@ async function phase1_issueLinks(page, existingIds, remainingQuota) {
 }
 
 /**
- * Phase 2: naver_shopping_url 일괄 추출
+ * Phase 2: affiliate_link 수집 (발급 링크 관리 페이지)
  */
-async function phase2_extractNaverUrls(page, issuedProducts) {
+async function phase2_collectAffiliateLinks(page, issuedProducts) {
   log('\n═══════════════════════════════════════════════');
-  log('Phase 2: naver_shopping_url 일괄 추출');
+  log('Phase 2: affiliate_link 수집 (발급 링크 관리 페이지)');
+  log('═══════════════════════════════════════════════\n');
+
+  if (issuedProducts.length === 0) {
+    log('수집할 상품이 없습니다.');
+    return { success: 0, failed: 0 };
+  }
+
+  // 발급된 productId Set 생성
+  const issuedProductIds = new Set(issuedProducts.map(p => p.productId));
+
+  await page.goto(LINKS_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2000);
+
+  let success = 0;
+  let failed = 0;
+  let pageNum = 1;
+  const maxPages = 20; // 최대 페이지 제한
+
+  while (pageNum <= maxPages) {
+    log(`  [페이지 ${pageNum}] 수집 중...`);
+
+    // 스크롤해서 모든 행 로드
+    let prevHeight = 0;
+    for (let i = 0; i < 10; i++) {
+      await page.evaluate(() => window.scrollBy(0, 500));
+      await page.waitForTimeout(200);
+      const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+      if (currentHeight === prevHeight) break;
+      prevHeight = currentHeight;
+    }
+
+    // 테이블 행 순회
+    const rows = await page.$$('tr');
+    let foundInPage = 0;
+
+    for (const row of rows) {
+      try {
+        // productId 추출
+        const productLink = await row.$('a[href*="/products/"]');
+        if (!productLink) continue;
+
+        const href = await productLink.getAttribute('href');
+        const productIdMatch = href.match(/products\/(\d+)/);
+        if (!productIdMatch) continue;
+
+        const productId = productIdMatch[1];
+
+        // 이번에 발급한 상품인지 확인
+        if (!issuedProductIds.has(productId)) continue;
+
+        // 이미 처리한 상품이면 스킵
+        issuedProductIds.delete(productId);
+
+        // 복사 버튼 클릭해서 affiliate_link 획득
+        const copyBtn = await row.$('button:has-text("복사")');
+        if (copyBtn) {
+          await copyBtn.click();
+          await page.waitForTimeout(300);
+
+          try {
+            const affiliateLink = await page.evaluate(() => navigator.clipboard.readText());
+            if (affiliateLink && affiliateLink.includes('naver.me')) {
+              await updateAffiliateLink(productId, affiliateLink);
+              log(`    ✅ ${productId}: ${affiliateLink}`);
+              success++;
+              foundInPage++;
+            } else {
+              failed++;
+            }
+          } catch (e) {
+            failed++;
+          }
+        }
+      } catch (e) {}
+    }
+
+    log(`    이 페이지: ${foundInPage}개 수집`);
+
+    // 모든 상품을 찾았으면 종료
+    if (issuedProductIds.size === 0) {
+      log(`  ✅ 모든 상품의 affiliate_link 수집 완료`);
+      break;
+    }
+
+    // 다음 페이지로
+    const nextBtn = await page.$('button[aria-label="다음 페이지"], button:has-text("다음")');
+    let hasNext = false;
+
+    if (nextBtn) {
+      const isDisabled = await nextBtn.evaluate(el =>
+        el.disabled || el.classList.contains('disabled') || el.getAttribute('aria-disabled') === 'true'
+      );
+      if (!isDisabled) {
+        hasNext = true;
+        await nextBtn.click();
+        await page.waitForTimeout(2000);
+        pageNum++;
+      }
+    }
+
+    if (!hasNext) {
+      // 페이지 번호 버튼 시도
+      const nextPageBtn = await page.$(`button:has-text("${pageNum + 1}")`);
+      if (nextPageBtn) {
+        await nextPageBtn.click();
+        await page.waitForTimeout(2000);
+        pageNum++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // 못 찾은 상품들
+  if (issuedProductIds.size > 0) {
+    log(`  ⚠️ ${issuedProductIds.size}개 상품의 affiliate_link를 찾지 못함`);
+    failed += issuedProductIds.size;
+  }
+
+  return { success, failed };
+}
+
+/**
+ * Phase 3: naver_shopping_url 일괄 추출
+ */
+async function phase3_extractNaverUrls(page, issuedProducts) {
+  log('\n═══════════════════════════════════════════════');
+  log('Phase 3: naver_shopping_url 일괄 추출');
   log('═══════════════════════════════════════════════\n');
 
   if (issuedProducts.length === 0) {
@@ -384,11 +518,12 @@ async function phase2_extractNaverUrls(page, issuedProducts) {
  * 메인 실행 함수
  */
 async function main() {
-  console.log('╔════════════════════════════════════════════════════╗');
-  console.log('║   Daily Link Issuer v2 - 라운드 로빈 + 일괄 추출   ║');
-  console.log('║   Phase 1: 카테고리 균등 링크 발급                 ║');
-  console.log('║   Phase 2: naver_shopping_url 일괄 추출            ║');
-  console.log('╚════════════════════════════════════════════════════╝\n');
+  console.log('╔════════════════════════════════════════════════════════╗');
+  console.log('║   Daily Link Issuer v3 - 라운드 로빈 + affiliate 수집  ║');
+  console.log('║   Phase 1: 카테고리 균등 링크 발급                     ║');
+  console.log('║   Phase 2: affiliate_link 수집 (발급 링크 관리)        ║');
+  console.log('║   Phase 3: naver_shopping_url 일괄 추출                ║');
+  console.log('╚════════════════════════════════════════════════════════╝\n');
 
   // 1. DB 연결 테스트
   log('DB 연결 테스트...');
@@ -466,31 +601,35 @@ async function main() {
     // 6. Phase 1: 링크 발급
     const phase1Result = await phase1_issueLinks(page, existingIds, remainingQuota);
 
-    // 7. Phase 2: naver_shopping_url 추출
-    const phase2Result = await phase2_extractNaverUrls(page, phase1Result.issuedProducts);
+    // 7. Phase 2: affiliate_link 수집
+    const phase2Result = await phase2_collectAffiliateLinks(page, phase1Result.issuedProducts);
 
-    // 8. 일일 발급 완료 처리
+    // 8. Phase 3: naver_shopping_url 추출
+    const phase3Result = await phase3_extractNaverUrls(page, phase1Result.issuedProducts);
+
+    // 9. 일일 발급 완료 처리
     if (phase1Result.totalIssued > 0) {
       await completeDailyIssuance();
     }
 
-    // 9. 최종 통계
+    // 10. 최종 통계
     const finalCount = await getProductCount();
 
-    console.log('\n╔════════════════════════════════════════════════════╗');
-    console.log('║   일일 발급 완료!                                  ║');
-    console.log('╠════════════════════════════════════════════════════╣');
+    console.log('\n╔════════════════════════════════════════════════════════╗');
+    console.log('║   일일 발급 완료!                                      ║');
+    console.log('╠════════════════════════════════════════════════════════╣');
     console.log(`║   Phase 1 - 링크 발급: ${phase1Result.totalIssued}개`);
-    console.log(`║   Phase 2 - URL 추출: 성공 ${phase2Result.success}, 실패 ${phase2Result.failed}`);
+    console.log(`║   Phase 2 - affiliate_link: 성공 ${phase2Result.success}, 실패 ${phase2Result.failed}`);
+    console.log(`║   Phase 3 - naver_url: 성공 ${phase3Result.success}, 실패 ${phase3Result.failed}`);
     console.log(`║   DB 총 상품: ${finalCount}개`);
-    console.log('╠════════════════════════════════════════════════════╣');
+    console.log('╠════════════════════════════════════════════════════════╣');
     console.log('║   카테고리별 현황:');
     for (const [cat, stats] of Object.entries(phase1Result.categoryStats)) {
       if (stats.issued > 0 || stats.skipped > 0) {
         console.log(`║     ${cat}: 발급 ${stats.issued}, 스킵 ${stats.skipped}`);
       }
     }
-    console.log('╚════════════════════════════════════════════════════╝\n');
+    console.log('╚════════════════════════════════════════════════════════╝\n');
 
   } catch (error) {
     log(`❌ 오류 발생: ${error.message}`);

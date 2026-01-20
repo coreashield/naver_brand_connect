@@ -397,6 +397,21 @@ export async function updateNaverShoppingUrl(productId, naverShoppingUrl) {
 }
 
 /**
+ * affiliate_link 업데이트
+ */
+export async function updateAffiliateLink(productId, affiliateLink) {
+  const { error } = await supabase
+    .from('products')
+    .update({
+      affiliate_link: affiliateLink,
+      updated_at: new Date().toISOString()
+    })
+    .eq('product_id', productId);
+
+  if (error) throw error;
+}
+
+/**
  * naver_shopping_url이 없는 상품 조회
  */
 export async function getProductsWithoutNaverUrl(limit = 100) {
@@ -800,6 +815,7 @@ export default {
   retryTask,
   testConnection,
   updateNaverShoppingUrl,
+  updateAffiliateLink,
   getProductsWithoutNaverUrl,
   getNaverUrlStats,
   deleteProduct,
