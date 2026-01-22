@@ -66,17 +66,29 @@ jobs:
       - name: Copy source files
         shell: pwsh
         run: |
-          $include = @("src","app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","package.json","package-lock.json","version.json","update_script.js","INSTALL.bat","자동글쓰기.bat","카페글쓰기.bat","블로그글쓰기.bat","상품정보업데이트.bat","enrich.bat",".env.sample")
-          foreach ($item in $include) {
-            if (Test-Path $item) {
-              if ((Get-Item $item).PSIsContainer) {
-                Copy-Item -Path $item -Destination "package/$item" -Recurse
-              } else {
-                Copy-Item -Path $item -Destination "package/$item"
-              }
-              Write-Host "Copied: $item"
-            }
+          # Copy directories
+          Copy-Item -Path "src" -Destination "package/src" -Recurse
+          Write-Host "Copied: src"
+
+          # Copy JS files
+          $jsFiles = @("app.js","cafe_writer.js","full_sync.js","full_sync_supabase.js","auto_link_issuer.js","update_script.js")
+          foreach ($f in $jsFiles) {
+            if (Test-Path $f) { Copy-Item $f "package/$f"; Write-Host "Copied: $f" }
           }
+
+          # Copy config files
+          $configFiles = @("package.json","package-lock.json","version.json",".env.sample")
+          foreach ($f in $configFiles) {
+            if (Test-Path $f) { Copy-Item $f "package/$f"; Write-Host "Copied: $f" }
+          }
+
+          # Copy ALL .bat files (including Korean named ones)
+          Get-ChildItem -Path "*.bat" | ForEach-Object {
+            Copy-Item $_.FullName "package/$($_.Name)"
+            Write-Host "Copied: $($_.Name)"
+          }
+
+          # Copy node_modules and create output
           Copy-Item -Path "node_modules" -Destination "package/node_modules" -Recurse
           New-Item -ItemType Directory -Force -Path "package/output"
           if (Test-Path "package/.env.sample") {
@@ -123,8 +135,9 @@ jobs:
             - 자동글쓰기.bat (카페+블로그 자동)
             - 카페글쓰기.bat
             - 블로그글쓰기.bat
+            - 상품링크발급.bat (어필리에이트 링크 발급)
             - 상품정보업데이트.bat
-            - enrich.bat (상품 정보 보강 - rating/brand/naver_url 수집)
+            - enrich.bat (상품 정보 보강)
 
             ### 포함 내용
             - Portable Node.js 20.11.0
