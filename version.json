@@ -1,11 +1,11 @@
 {
-  "version": "1.14.0",
-  "updated_at": "2026-01-19",
+  "version": "1.15.0",
+  "updated_at": "2026-01-22",
   "changes": [
-    "daily_link_issuer v3: Added Phase 2 affiliate_link collection",
-    "Phase 1: Round-robin link issuance across categories",
-    "Phase 2: Collect affiliate_link from issued links management page",
-    "Phase 3: Extract naver_shopping_url from product pages",
-    "Products now have complete affiliate_link for posting"
+    "cafe_writer: 150개 한도 감지 로직 개선",
+    "다이얼로그 메시지 감지 추가 (게시글 등록 제한 초과)",
+    "HTTP 500 네트워크 응답 감지 추가 (백업)",
+    "실패 시 재시도 로직 추가 (최대 3회, 같은 콘텐츠 재사용)",
+    "Gemini API 호출 최적화 (재시도 시 재호출 없음)"
   ]
 }

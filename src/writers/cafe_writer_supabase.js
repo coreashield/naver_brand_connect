@@ -474,11 +474,9 @@ async function generateContentWithGemini(product) {
 }
 
 // 카페 글 작성
-async function writePost(page, product, images, doLoginFn) {
+async function writePost(page, product, images, doLoginFn, geminiResult) {
   try {
     log(`글 작성 시작: ${product.name.substring(0, 30)}...`);
-
-    const geminiResult = await generateContentWithGemini(product);
 
     // 계정에서 카페 URL 가져오기
     const cafeWriteUrl = account?.cafe_url || 'https://cafe.naver.com/ca-fe/cafes/31634939/articles/write?boardType=L';
@@ -760,47 +758,105 @@ async function writePost(page, product, images, doLoginFn) {
 
     let registered = false;
 
-    const skinGreenBtn = page.locator('button.BaseButton--skinGreen');
-    if (await skinGreenBtn.count() > 0) {
-      log(`  등록 버튼 발견 (skinGreen), 클릭 시도...`);
-      await skinGreenBtn.first().click();
-      await page.waitForTimeout(5000);
-
-      const postUrl = page.url();
-      if (!postUrl.includes('/write')) {
-        log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
-        registered = true;
+    // 한도 도달 감지를 위한 다이얼로그 리스너
+    let limitReachedByDialog = false;
+    const dialogHandler = async (dialog) => {
+      const message = dialog.message();
+      if (message.includes('게시글 등록 제한을 초과') ||
+          message.includes('ID/IP당 게시글 등록 제한')) {
+        limitReachedByDialog = true;
+        log(`  🛑 한도 초과 다이얼로그 감지: ${message.substring(0, 60)}...`);
       }
-    }
+      await dialog.accept();
+    };
+    page.on('dialog', dialogHandler);
 
-    if (!registered) {
-      const baseBtns = await page.locator('.BaseButton').all();
-      for (const btn of baseBtns) {
-        try {
-          const text = await btn.innerText();
-          const cls = await btn.getAttribute('class') || '';
-          if (text.trim() === '등록' && !cls.includes('temp')) {
-            log(`  등록 버튼 발견 (BaseButton)`);
-            await btn.click();
-            await page.waitForTimeout(5000);
+    // 한도 도달 감지를 위한 네트워크 응답 리스너 (백업)
+    let limitReachedByNetwork = false;
+    const responseHandler = (response) => {
+      // 글 등록 API가 HTTP 500을 반환하면 한도 도달로 판단
+      if (response.url().includes('/articles') &&
+          response.request().method() === 'POST' &&
+          response.status() === 500) {
+        limitReachedByNetwork = true;
+        log(`  🛑 한도 초과 네트워크 응답 감지: HTTP 500`);
+      }
+    };
+    page.on('response', responseHandler);
 
-            const postUrl = page.url();
-            if (!postUrl.includes('/write')) {
-              log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
-              registered = true;
+    // 리스너 정리 헬퍼
+    const cleanupListeners = () => {
+      page.off('dialog', dialogHandler);
+      page.off('response', responseHandler);
+    };
+
+    // 한도 도달 체크 헬퍼
+    const isLimitReached = () => limitReachedByDialog || limitReachedByNetwork;
+
+    try {
+      const skinGreenBtn = page.locator('button.BaseButton--skinGreen');
+      if (await skinGreenBtn.count() > 0) {
+        log(`  등록 버튼 발견 (skinGreen), 클릭 시도...`);
+        await skinGreenBtn.first().click();
+        await page.waitForTimeout(5000);
+
+        // 다이얼로그 또는 네트워크로 한도 감지
+        if (isLimitReached()) {
+          const method = limitReachedByDialog ? '다이얼로그' : '네트워크';
+          log(`  🛑 일일 한도 도달 (${method} 감지)`);
+          cleanupListeners();
+          return 'limit_reached';
+        }
+
+        const postUrl = page.url();
+        if (!postUrl.includes('/write')) {
+          log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
+          registered = true;
+        }
+      }
+
+      if (!registered) {
+        const baseBtns = await page.locator('.BaseButton').all();
+        for (const btn of baseBtns) {
+          try {
+            const text = await btn.innerText();
+            const cls = await btn.getAttribute('class') || '';
+            if (text.trim() === '등록' && !cls.includes('temp')) {
+              log(`  등록 버튼 발견 (BaseButton)`);
+              await btn.click();
+              await page.waitForTimeout(5000);
+
+              // 다이얼로그 또는 네트워크로 한도 감지
+              if (isLimitReached()) {
+                const method = limitReachedByDialog ? '다이얼로그' : '네트워크';
+                log(`  🛑 일일 한도 도달 (${method} 감지)`);
+                cleanupListeners();
+                return 'limit_reached';
+              }
+
+              const postUrl = page.url();
+              if (!postUrl.includes('/write')) {
+                log(`  ✅ 글 등록 완료! URL: ${postUrl}`);
+                registered = true;
+              }
+              break;
             }
-            break;
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
       }
-    }
 
-    if (!registered) {
-      log(`  ⚠️ 등록 버튼 못찾음 - 일일 한도 도달로 처리`);
-      return 'limit_reached';  // 특별 상태: 한도 도달 처리 필요
-    }
+      if (!registered) {
+        log(`  ⚠️ 등록 버튼 못찾음 또는 등록 실패`);
+        cleanupListeners();
+        return false;  // 일반 실패로 처리 (한도 도달이 아님)
+      }
 
-    return registered;
+      cleanupListeners();
+      return registered;
+    } catch (e) {
+      cleanupListeners();
+      throw e;
+    }
 
   } catch (e) {
     log(`  ❌ 글 작성 오류: ${e.message}`);
@@ -986,11 +1042,43 @@ async function main() {
         continue;
       }
 
-      const result = await writePost(page, product, images, doLogin);
+      // Gemini로 콘텐츠 생성 (1회만 - 재시도 시 재사용)
+      log(`  📝 Gemini 콘텐츠 생성 중...`);
+      const geminiResult = await generateContentWithGemini(product);
 
-      // 등록 버튼 못찾음 = 일일 한도 도달로 처리
+      // 재시도 루프 (최대 3회)
+      const MAX_RETRIES = 3;
+      let result = false;
+      let retryCount = 0;
+
+      while (retryCount < MAX_RETRIES) {
+        if (retryCount > 0) {
+          log(`  🔄 재시도 ${retryCount}/${MAX_RETRIES - 1} (같은 콘텐츠 사용)...`);
+          await page.waitForTimeout(5000);  // 재시도 전 5초 대기
+        }
+
+        result = await writePost(page, product, images, doLogin, geminiResult);
+
+        // 한도 도달이면 재시도 없이 즉시 종료
+        if (result === 'limit_reached') {
+          break;
+        }
+
+        // 성공이면 루프 종료
+        if (result === true) {
+          break;
+        }
+
+        // 실패(false)면 재시도
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          log(`  ⚠️ 등록 실패 - 재시도 예정...`);
+        }
+      }
+
+      // 다이얼로그 또는 HTTP 500으로 일일 한도 도달 감지
       if (result === 'limit_reached') {
-        log(`\n🛑 등록 버튼 못찾음 - 일일 한도 도달로 처리합니다.`);
+        log(`\n🛑 일일 한도 도달 감지 - 작업을 중단합니다.`);
         try {
           const limitCount = await setAccountCountToLimit(ACCOUNT_ID, 'cafe');
           log(`   카페 카운트를 ${limitCount}/${limitCount}로 설정 완료`);
@@ -1015,6 +1103,8 @@ async function main() {
         // DB에 카운트 증가
         const newCount = await incrementAccountCount(ACCOUNT_ID, 'cafe');
         log(`  ✅ 오늘 게시 완료: ${newCount}/${account.daily_cafe_limit}개`);
+      } else {
+        log(`  ❌ ${MAX_RETRIES}회 재시도 후에도 실패`);
       }
 
       try {
@@ -1023,7 +1113,7 @@ async function main() {
           worker?.id || null,
           'cafe',
           success,
-          success ? null : 'Post failed'
+          success ? null : `Post failed after ${retryCount} retries`
         );
         log(`  Post record saved`);
       } catch (e) {
