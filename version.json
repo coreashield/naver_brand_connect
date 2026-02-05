@@ -1,11 +1,13 @@
 {
-  "version": "1.15.2",
-  "updated_at": "2026-01-22",
+  "version": "1.16.0",
+  "updated_at": "2026-02-05",
   "changes": [
-    "자동글쓰기.bat 설명 업데이트",
-    "카페 150개 한도, 재시도 로직 안내 추가",
-    "빌드: 한글 배치파일 포함 확인",
-    "cafe_writer: 다이얼로그 + HTTP 500 이중 감지",
-    "실패 시 재시도 (최대 3회, 같은 콘텐츠)"
+    "batch_update_products: 네이버 로그인 + context 재사용으로 크롤링 안정화",
+    "batch_update_products: URL 객체 처리 버그 수정 (waitForURL)",
+    "batch_update_products: 배치 한도 500개로 증가",
+    "product_detail_crawler: useExistingContext 옵션 추가 (세션 유지)",
+    "enrich.bat: portable/system Node.js 자동 감지",
+    "check_db_status.js: DB 파싱 상태 확인 유틸리티 추가",
+    "daily_link_issuer: ACCOUNT_ID 하드코딩 안정화"
   ]
 }

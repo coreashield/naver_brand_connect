@@ -7,8 +7,11 @@ import { chromium } from 'playwright';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { crawlProductDetail } from './product_detail_crawler.js';
+import { getAccountById } from '../supabase/db.js';
 
 dotenv.config();
+
+const ACCOUNT_ID = 1; // 하드코딩: 계정 1번 사용
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -67,7 +70,7 @@ async function updateProduct(productId, info) {
 
   if (info.category) updateData.category = info.category;
   if (info.brand) updateData.brand = info.brand;
-  if (info.manufacturer) updateData.manufacturer = info.manufacturer;
+  // manufacturer 컬럼이 DB에 없으므로 제외
   if (info.description) updateData.description = info.description;
   if (info.rating) updateData.rating = info.rating;
   if (info.reviewCount) updateData.review_count = info.reviewCount;
@@ -97,7 +100,7 @@ async function main() {
   console.log('='.repeat(60));
 
   log('Querying products needing update...');
-  const products = await getProductsNeedingUpdate(100);
+  const products = await getProductsNeedingUpdate(500);
 
   if (products.length === 0) {
     log('[OK] All products already updated.');
@@ -105,6 +108,15 @@ async function main() {
   }
 
   log(`[INFO] ${products.length} products to update`);
+
+  // 계정 정보 로드
+  log('Loading account info...');
+  const account = await getAccountById(ACCOUNT_ID);
+  if (!account) {
+    log(`[ERROR] Account ID ${ACCOUNT_ID} not found`);
+    return;
+  }
+  log(`[OK] Account: ${account.naver_id}`);
 
   log('Starting browser...');
   const browser = await chromium.launch({
@@ -117,6 +129,33 @@ async function main() {
       '--disable-setuid-sandbox'
     ]
   });
+
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  });
+  const page = await context.newPage();
+
+  // 네이버 로그인
+  log('Logging in to Naver...');
+  await page.goto('https://nid.naver.com/nidlogin.login', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(1000);
+
+  await page.click('#id');
+  await page.keyboard.type(account.naver_id, { delay: 50 });
+  await page.click('#pw');
+  await page.keyboard.type(account.naver_pw, { delay: 50 });
+  await page.click('#log\\.login');
+  await page.waitForTimeout(3000);
+
+  // 로그인 확인
+  const currentUrl = page.url();
+  if (currentUrl.includes('nidlogin') || currentUrl.includes('captcha')) {
+    log('[WARN] CAPTCHA detected - please solve manually...');
+    await page.waitForURL(url => { const s = String(url); return !s.includes('nidlogin') && !s.includes('captcha'); }, { timeout: 120000 });
+  }
+  log('[OK] Login successful');
+
+  await page.close();
 
   let successCount = 0;
   let failCount = 0;
@@ -136,7 +175,8 @@ async function main() {
       }
 
       try {
-        const info = await crawlProductDetail(browser, url);
+        // 로그인된 context를 사용하여 크롤링
+        const info = await crawlProductDetail(context, url, { useExistingContext: true });
 
         if (info.success) {
           const updated = await updateProduct(product.product_id, info);
@@ -166,6 +206,7 @@ async function main() {
       }
     }
   } finally {
+    await context.close();
     await browser.close();
   }
 

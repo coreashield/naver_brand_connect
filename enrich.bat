@@ -11,16 +11,25 @@ echo.
 :: 실행 경로 설정
 cd /d "%~dp0"
 
-:: Node.js 경로 설정 (portable 버전 사용)
-set PATH=%~dp0node;%PATH%
-set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+:: Node.js 경로 설정 (portable 버전 우선, 없으면 시스템 Node 사용)
+if exist "%~dp0node\node.exe" (
+    set PATH=%~dp0node;%PATH%
+    set NODE_TYPE=portable
+) else (
+    set NODE_TYPE=system
+)
+
+:: Playwright 브라우저 경로 (portable 버전용)
+if exist "%~dp0browsers" (
+    set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
+)
 
 :: 환경 정보 출력
 echo [환경 정보]
 echo   실행 경로: %~dp0
-echo   Node 경로: %~dp0node
-echo   브라우저: %PLAYWRIGHT_BROWSERS_PATH%
-node --version 2>nul || echo   Node.js를 찾을 수 없습니다!
+echo   Node 타입: %NODE_TYPE%
+for /f "tokens=*" %%i in ('node --version 2^>nul') do echo   Node 버전: %%i
+node --version >nul 2>&1 || (echo   ❌ Node.js를 찾을 수 없습니다! & pause & exit /b)
 echo.
 
 :: 모드 선택

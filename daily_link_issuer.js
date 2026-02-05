@@ -29,7 +29,7 @@ dotenv.config();
 // 계정 정보 (DB에서 로드)
 // ⚠️ 중요: 캠페인 ID 904249244338784는 계정 1 (ingredient7303126)에 연결됨
 // 다른 계정으로 실행 시 "접근 권한이 없습니다" 오류 발생
-const ACCOUNT_ID = parseInt(process.env.ACCOUNT_ID) || 1;
+const ACCOUNT_ID = 1; // 하드코딩: 계정 1번 사용
 let account = null;
 
 // URLs (캠페인 ID는 계정 1 전용)

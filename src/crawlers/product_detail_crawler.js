@@ -58,12 +58,23 @@ async function createStealthContext(browser) {
 
 /**
  * 상품 상세 정보 수집
- * @param {Object} browser - Playwright 브라우저 인스턴스 (재사용)
+ * @param {Object} browserOrContext - Playwright 브라우저 또는 컨텍스트 인스턴스
  * @param {string} affiliateLink - 어필리에이트 링크 또는 상품 URL
+ * @param {Object} options - 옵션 { useExistingContext: true }면 browserOrContext를 context로 사용
  * @returns {Object} 상품 상세 정보
  */
-export async function crawlProductDetail(browser, affiliateLink) {
-  const context = await createStealthContext(browser);
+export async function crawlProductDetail(browserOrContext, affiliateLink, options = {}) {
+  let context;
+  let shouldCloseContext = false;
+
+  if (options.useExistingContext) {
+    // 전달받은 것을 context로 사용 (로그인 세션 유지)
+    context = browserOrContext;
+  } else {
+    // 기존 방식: browser에서 새 context 생성
+    context = await createStealthContext(browserOrContext);
+    shouldCloseContext = true;
+  }
 
   const page = await context.newPage();
 
@@ -233,7 +244,10 @@ export async function crawlProductDetail(browser, affiliateLink) {
     console.error('크롤링 에러:', error.message);
     return { success: false, error: error.message, url: affiliateLink };
   } finally {
-    await context.close();
+    await page.close();
+    if (shouldCloseContext) {
+      await context.close();
+    }
   }
 }
 
